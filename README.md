@@ -1,38 +1,40 @@
 # cc-agent
 
-CronCommander Agent is a lightweight daemon that observes cron job execution and reports metadata to CronCommander.
+CronCommander Agent is a lightweight daemon that connects cron-based systems
+to the CronCommander control plane.
 
-It is designed to run alongside existing cron setups with minimal overhead and minimal configuration.
+It provides the foundation for centralized visibility and management of cron jobs
+across servers, containers, and environments.
 
 ## What it does
 
 - Runs as a long-lived agent on a host or container
-- Collects execution metadata from cron jobs
-- Reports status, timing, and failures to the CronCommander server
+- Observes cron job executions
+- Reports execution metadata to the CronCommander server
 
 The agent does **not** replace cron.
-It makes cron observable.
+It enables centralization and control on top of existing cron setups.
 
 ## Design goals
 
 - Lightweight and low overhead
-- Explicit behavior, no hidden magic
-- Easy to deploy on servers and containers
-- Safe to run in production environments
+- Explicit behavior, no hidden automation
+- Safe to deploy in production environments
+- Designed to support centralized inspection and control
 
 ## What it does not do
 
 - It does not schedule jobs
-- It does not modify existing cron configuration
-- It does not execute jobs itself
+- It does not modify cron configuration
+- It does not make control decisions on its own
 
 ## Status
 
 Early development.
-Interfaces and behavior may change.
+Interfaces and behavior may evolve as centralized management features land.
 
 ## Project
 
-Part of the **CronCommander** project.
+Part of the **CronCommander** project — a centralized control plane for cron jobs.
 
 Website: https://croncommander.com
