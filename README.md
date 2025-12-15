@@ -1,3 +1,6 @@
+![GitHub stars](https://img.shields.io/github/stars/croncommander/cc-agent?style=social)
+![License](https://img.shields.io/github/license/croncommander/cc-agent)
+
 # cc-agent
 
 CronCommander Agent is a lightweight daemon that connects cron-based systems
