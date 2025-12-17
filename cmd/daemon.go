@@ -150,30 +150,30 @@ type daemon struct {
 }
 
 func (d *daemon) run() {
-	reconnectDelay := reconnectDelay
+	currentDelay := reconnectDelay
 
 	for {
 		err := d.connect()
 		if err != nil {
-			log.Printf("Connection failed: %v. Reconnecting in %v...", err, reconnectDelay)
-			time.Sleep(reconnectDelay)
+			log.Printf("Connection failed: %v. Reconnecting in %v...", err, currentDelay)
+			time.Sleep(currentDelay)
 			
 			// Exponential backoff
-			reconnectDelay *= 2
-			if reconnectDelay > maxReconnectDelay {
-				reconnectDelay = maxReconnectDelay
+			currentDelay *= 2
+			if currentDelay > maxReconnectDelay {
+				currentDelay = maxReconnectDelay
 			}
 			continue
 		}
 
 		// Reset delay on successful connection
-		reconnectDelay = reconnectDelay
+		currentDelay = reconnectDelay
 
 		// Run message loop
 		d.messageLoop()
 
 		log.Println("Connection lost. Reconnecting...")
-		time.Sleep(reconnectDelay)
+		time.Sleep(currentDelay)
 	}
 }
 
