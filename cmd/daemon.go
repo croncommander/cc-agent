@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -282,11 +283,21 @@ func generateCronContent(jobs []protocol.JobDefinition) []byte {
 	buf.WriteString("PATH=/usr/local/bin:/usr/bin:/bin\n\n")
 
 	for _, job := range jobs {
+		// Validate inputs to prevent cron injection
+		if containsNewline(job.CronExpression) || containsNewline(job.JobID) || containsNewline(job.Command) {
+			log.Printf("Skipping job %q: contains invalid characters (newlines)", job.JobID)
+			continue
+		}
+
 		// Format: <cronExpression> ccrunner /usr/local/bin/cc-agent exec --job-id <jobId> -- <command>
 		fmt.Fprintf(&buf, "%s ccrunner /usr/local/bin/cc-agent exec --job-id %s -- %s\n",
 			job.CronExpression, job.JobID, job.Command)
 	}
 	return buf.Bytes()
+}
+
+func containsNewline(s string) bool {
+	return strings.ContainsAny(s, "\n\r")
 }
 
 func (d *daemon) syncCronFile(jobs []protocol.JobDefinition) {
