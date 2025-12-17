@@ -290,14 +290,25 @@ func generateCronContent(jobs []protocol.JobDefinition) []byte {
 		}
 
 		// Format: <cronExpression> ccrunner /usr/local/bin/cc-agent exec --job-id <jobId> -- <command>
+		// We use shellQuote to safely quote the JobID to prevent shell injection.
+		// Command is also passed, but currently assumed to be a command string.
 		fmt.Fprintf(&buf, "%s ccrunner /usr/local/bin/cc-agent exec --job-id %s -- %s\n",
-			job.CronExpression, job.JobID, job.Command)
+			job.CronExpression, shellQuote(job.JobID), job.Command)
 	}
 	return buf.Bytes()
 }
 
 func containsNewline(s string) bool {
 	return strings.ContainsAny(s, "\n\r")
+}
+
+// shellQuote quotes a string for safe use in a shell command.
+// It uses single quotes and escapes existing single quotes.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 func (d *daemon) syncCronFile(jobs []protocol.JobDefinition) {
