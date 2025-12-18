@@ -239,16 +239,15 @@ func (d *daemon) messageLoop() {
 }
 
 func (d *daemon) handleMessage(data []byte) {
-	var baseMsg protocol.Message
-	if err := json.Unmarshal(data, &baseMsg); err != nil {
+	// Optimization: Use UnifiedMessage to unmarshal only once
+	var msg UnifiedMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
 		log.Printf("Failed to parse message: %v", err)
 		return
 	}
 
-	switch baseMsg.Type {
+	switch msg.Type {
 	case "register_ack":
-		var msg protocol.RegisterAckMessage
-		json.Unmarshal(data, &msg)
 		if msg.Status == "success" {
 			d.agentID = msg.AgentID
 			log.Printf("Registration successful. Agent ID: %s", d.agentID)
@@ -260,18 +259,14 @@ func (d *daemon) handleMessage(data []byte) {
 		log.Println("Heartbeat acknowledged")
 
 	case "sync_jobs":
-		var msg protocol.SyncJobsMessage
-		json.Unmarshal(data, &msg)
 		log.Printf("Received sync_jobs with %d jobs", len(msg.Jobs))
 		d.syncCronFile(msg.Jobs)
 
 	case "error":
-		var msg protocol.ErrorMessage
-		json.Unmarshal(data, &msg)
 		log.Printf("Server error: %s", msg.Reason)
 
 	default:
-		log.Printf("Unknown message type: %s", baseMsg.Type)
+		log.Printf("Unknown message type: %s", msg.Type)
 	}
 }
 
