@@ -1,9 +1,4 @@
-## 2025-12-17 - Cron Injection via Newlines
-**Risk:** The agent generates cron files by interpolating string fields (`CronExpression`, `JobID`, `Command`) directly into a template. If any of these fields contain a newline (`\n`), an attacker controlling the job definition (e.g., a compromised server) can inject arbitrary cron entries, leading to Remote Code Execution as root or other users.
-**Learning:** Text-based formats like Cron, where newlines are delimiters, are vulnerable to injection just like SQL or HTML. Simple string formatting is insufficient when handling untrusted input in such formats.
-**Action:** Always validate that inputs destined for line-based configuration files do not contain newline characters. Use sanitization or rejection for invalid inputs.
-
-## 2024-05-23 - Shell Injection via Unquoted Arguments in Cron Files
-**Risk:** The `JobID` field was interpolated directly into the cron command line (`... --job-id %s ...`). Since cron executes commands via a shell (`/bin/sh` or specified `SHELL`), an attacker could inject shell metacharacters (e.g., `; rm -rf /`) into the `JobID` to execute arbitrary commands.
-**Learning:** Even if a string is intended to be a simple identifier, if it passes through a shell (as all cron commands do), it must be quoted or strictly validated. Standard Go `exec.Command` safety does not apply when the entry point is a shell script or cron line.
-**Action:** Use a `shellQuote` helper (wrapping in single quotes and escaping existing single quotes) for all data arguments interpolated into shell command strings.
+## 2025-12-18 - Cron Shell Injection via Unquoted Command Strings
+**Risk:** The previous fix for injection used `shellQuote` but did not apply it to the `Command` payload itself, and the `Command` was not wrapped in an explicit shell invocation. This allowed metacharacters in the `Command` string to be interpreted by the cron shell, potentially allowing attackers to execute arbitrary commands outside the intended execution scope.
+**Learning:** When passing a "command string" through an intermediate shell (like cron) to an execution wrapper, the safest pattern is to quote the command string and pass it as an argument to `sh -c`. This ensures the cron shell sees it as a single argument, and the inner shell executes it as intended, isolating the execution environments.
+**Action:** Wrap cron commands in `/bin/sh -c '<quoted_command>'` and ensure all other arguments (like JobID) are strictly shell-quoted.
