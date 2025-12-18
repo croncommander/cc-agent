@@ -308,6 +308,15 @@ func containsNewline(s string) bool {
 	return strings.ContainsAny(s, "\n\r")
 }
 
+// shellQuote quotes a string for safe use in a shell command.
+// It uses single quotes and escapes existing single quotes.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
 func (d *daemon) syncCronFile(jobs []protocol.JobDefinition) {
 	// Generate cron file content
 	content := generateCronContent(jobs)
