@@ -72,3 +72,13 @@ type ErrorMessage struct {
 	Type   string `json:"type"`
 	Reason string `json:"reason"`
 }
+
+// UnifiedMessage combines fields from all message types for efficient single-pass unmarshalling
+type UnifiedMessage struct {
+	Type    string                 `json:"type"`
+	Status  string                 `json:"status,omitempty"`
+	AgentID string                 `json:"agentId,omitempty"`
+	Reason  string                 `json:"reason,omitempty"`
+	Jobs    []JobDefinition        `json:"jobs,omitempty"`
+	Payload ExecutionReportPayload `json:"payload,omitempty"`
+}
