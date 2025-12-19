@@ -296,9 +296,11 @@ func generateCronContent(jobs []protocol.JobDefinition) []byte {
 		// Format: <cronExpression> ccrunner /usr/local/bin/cc-agent exec --job-id <jobId> -- <command>
 		buf.WriteString(job.CronExpression)
 		buf.WriteString(" ccrunner /usr/local/bin/cc-agent exec --job-id ")
-		buf.WriteString(job.JobID)
+		buf.WriteString(shellQuote(job.JobID))
 		buf.WriteString(" -- ")
-		buf.WriteString(job.Command)
+		// Wrap command in /bin/sh -c to safely handle shell metacharacters and preserve semantics
+		// The inner command must be quoted to be treated as a single argument to -c
+		buf.WriteString(fmt.Sprintf("/bin/sh -c %s", shellQuote(job.Command)))
 		buf.WriteByte('\n')
 	}
 	return buf.Bytes()
