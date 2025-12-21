@@ -55,3 +55,41 @@ func TestGenerateCronContent_Sanitization(t *testing.T) {
 		t.Errorf("Vulnerability found: Job ID newline preserved")
 	}
 }
+
+func TestGenerateCronContent_CommandInjection(t *testing.T) {
+	jobs := []protocol.JobDefinition{
+		{
+			JobID:          "injection-test",
+			CronExpression: "* * * * *",
+			Command:        "echo hello; echo pwned",
+		},
+		{
+			JobID:          "id-injection; rm -rf /",
+			CronExpression: "* * * * *",
+			Command:        "echo safe",
+		},
+	}
+
+	content := generateCronContent(jobs)
+	output := string(content)
+
+	// Expected output for command injection:
+	// ... --job-id 'injection-test' -- /bin/sh -c 'echo hello; echo pwned'
+	expectedCmd := " /bin/sh -c 'echo hello; echo pwned'"
+	if !strings.Contains(output, expectedCmd) {
+		t.Errorf("Security fix missing: Command should be wrapped in /bin/sh -c and quoted. Got: %s", output)
+	}
+
+	// Expected output for ID injection:
+	// ... --job-id 'id-injection; rm -rf /' -- ...
+	// Just check that it is quoted
+	expectedID := "'id-injection; rm -rf /'"
+	if !strings.Contains(output, expectedID) {
+		t.Errorf("Security fix missing: Job ID should be quoted. Got: %s", output)
+	}
+
+	// Ensure no raw injection
+	if strings.Contains(output, " --job-id id-injection; rm -rf /") {
+		t.Errorf("Vulnerability found: Job ID injection possible")
+	}
+}
