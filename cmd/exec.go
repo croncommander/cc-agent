@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -48,10 +47,13 @@ func runExec(cmd *cobra.Command, args []string) {
 	// Execute the command
 	startTime := time.Now()
 	
-	var stdout, stderr bytes.Buffer
+	// Capture output with size limit to prevent DoS/OOM
+	stdout := newLimitedBuffer(0) // 0 uses default limit (1MB)
+	stderr := newLimitedBuffer(0)
+
 	execCmd := exec.Command(commandArgs[0], commandArgs[1:]...)
-	execCmd.Stdout = &stdout
-	execCmd.Stderr = &stderr
+	execCmd.Stdout = stdout
+	execCmd.Stderr = stderr
 	
 	err := execCmd.Run()
 	
@@ -63,7 +65,8 @@ func runExec(cmd *cobra.Command, args []string) {
 			exitCode = exitError.ExitCode()
 		} else {
 			exitCode = 1
-			stderr.WriteString(fmt.Sprintf("\nExecution error: %v", err))
+			// Write error to stderr if not already truncated
+			stderr.Write([]byte(fmt.Sprintf("\nExecution error: %v", err)))
 		}
 	}
 
