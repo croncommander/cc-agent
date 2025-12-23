@@ -27,24 +27,34 @@ func TestLimitedBuffer_Write(t *testing.T) {
 			wantTrunc: false,
 		},
 		{
-			name:      "Truncation in single write",
+			name:      "Truncation keep tail single write",
 			limit:     5,
 			writes:    []string{"helloworld"},
-			want:      "hello\n... output truncated ...",
+			want:      "... output truncated ...\nworld",
 			wantTrunc: true,
 		},
 		{
-			name:      "Truncation in second write",
-			limit:     10,
-			writes:    []string{"hello", " world! this is long"},
-			want:      "hello worl\n... output truncated ...",
-			wantTrunc: true,
-		},
-		{
-			name:      "Writes after truncation are ignored",
+			name:      "Truncation keep tail multiple writes",
 			limit:     5,
-			writes:    []string{"hello", "world", "ignored"},
-			want:      "hello\n... output truncated ...",
+			writes:    []string{"12345", "67890"},
+			want:      "... output truncated ...\n67890",
+			wantTrunc: true,
+		},
+		{
+			name:      "Truncation partial overwrite",
+			limit:     5,
+			writes:    []string{"12345", "67"},
+			// Buffer: [1 2 3 4 5] -> wrapped -> [6 7 3 4 5] (head at 2)
+			// Output: 3 4 5 6 7
+			want:      "... output truncated ...\n34567",
+			wantTrunc: true,
+		},
+		{
+			name:      "Truncation with very large write",
+			limit:     5,
+			writes:    []string{"abcdefghijklmn"},
+			// Should keep last 5: "jklmn"
+			want:      "... output truncated ...\njklmn",
 			wantTrunc: true,
 		},
 	}
@@ -62,8 +72,9 @@ func TestLimitedBuffer_Write(t *testing.T) {
 				}
 			}
 
-			if lb.truncated != tt.wantTrunc {
-				t.Errorf("truncated = %v, want %v", lb.truncated, tt.wantTrunc)
+			isTruncated := lb.totalWritten > int64(tt.limit)
+			if isTruncated != tt.wantTrunc {
+				t.Errorf("truncated = %v, want %v", isTruncated, tt.wantTrunc)
 			}
 
 			if got := lb.String(); got != tt.want {
@@ -74,41 +85,37 @@ func TestLimitedBuffer_Write(t *testing.T) {
 }
 
 func TestLimitedBuffer_ExactBehavior(t *testing.T) {
-	lb := newLimitedBuffer(10)
-	n, err := lb.Write([]byte("hello"))
+	lb := newLimitedBuffer(5)
+
+	// Write "abcde" (5 chars)
+	n, err := lb.Write([]byte("abcde"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n != 5 {
 		t.Errorf("expected 5, got %d", n)
 	}
-	if lb.String() != "hello" {
-		t.Errorf("expected 'hello', got '%s'", lb.String())
+	if lb.totalWritten > 5 {
+		t.Errorf("should not be truncated yet")
+	}
+	if lb.String() != "abcde" {
+		t.Errorf("got %q, want 'abcde'", lb.String())
 	}
 
-	// Write exceeding limit
-	n, err = lb.Write([]byte("world!"))
+	// Write "f" -> should wrap to "bcdef"
+	n, err = lb.Write([]byte("f"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 6 {
-		t.Errorf("expected 6 (fake success), got %d", n)
+	if n != 1 {
+		t.Errorf("expected 1, got %d", n)
+	}
+	if lb.totalWritten <= 5 {
+		t.Errorf("should be truncated")
 	}
 
-	expected := "helloworld\n... output truncated ..."
+	expected := "... output truncated ...\nbcdef"
 	if lb.String() != expected {
-		t.Errorf("expected '%s', got '%s'", expected, lb.String())
-	}
-
-	// Subsequent write
-	n, err = lb.Write([]byte("foo"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 3 {
-		t.Errorf("expected 3, got %d", n)
-	}
-	if lb.String() != expected {
-		t.Errorf("buffer changed after truncation")
+		t.Errorf("got %q, want %q", lb.String(), expected)
 	}
 }
