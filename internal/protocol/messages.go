@@ -32,15 +32,20 @@ type HeartbeatAckMessage struct {
 }
 
 // ExecutionReportPayload contains the execution details
+// SECURITY: All fields are logged verbatim for auditability - commands are NOT redacted.
 type ExecutionReportPayload struct {
-	JobID      string `json:"jobId"`
-	Command    string `json:"command"`
-	ExitCode   int    `json:"exitCode"`
-	Stdout     string `json:"stdout"`
-	Stderr     string `json:"stderr"`
-	StartTime  string `json:"startTime"`
-	DurationMs int    `json:"durationMs"`
+	JobID         string `json:"jobId"`
+	Command       string `json:"command"`
+	ExitCode      int    `json:"exitCode"`
+	ExecutingUID  int    `json:"executingUid"`           // UID of the user executing the job
+	ExecutingUser string `json:"executingUser"`          // Username of the user executing the job
+	Warning       string `json:"warning,omitempty"`      // Security warnings (e.g., unexpected user)
+	Stdout        string `json:"stdout"`
+	Stderr        string `json:"stderr"`
+	StartTime     string `json:"startTime"`
+	DurationMs    int    `json:"durationMs"`
 }
+
 
 // ExecutionReportMessage wraps an execution report
 type ExecutionReportMessage struct {
