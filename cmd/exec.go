@@ -3,15 +3,18 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"strings"
 	"time"
 
 	"github.com/croncommander/cc-agent/internal/protocol"
 	"github.com/spf13/cobra"
 )
+
 
 var (
 	execJobID string
@@ -44,20 +47,75 @@ func runExec(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// SECURITY: Collect execution context for audit logging
+	executingUID := os.Geteuid()
+	executingUser := "unknown"
+	var securityWarning string
+
+	currentUser, err := user.Current()
+	if err == nil {
+		executingUser = currentUser.Username
+	}
+
+	// SECURITY: Fail fast if running as root (UID 0).
+	// Running jobs as root defeats privilege separation and increases RCE impact.
+	if executingUID == 0 {
+		fmt.Fprintln(os.Stderr, "Error: cc-agent exec must not run as root (UID 0)")
+		fmt.Fprintln(os.Stderr, "Jobs should execute as an unprivileged user (e.g., ccrunner).")
+		fmt.Fprintln(os.Stderr, "See: https://croncommander.com/docs/security")
+		os.Exit(1)
+	}
+
+	// SECURITY: Warn if not running as an expected user.
+	// Configurable pool allows flexibility for different deployment environments.
+	allowedUsers := []string{"ccrunner", "ccagent-exec", "ccexec"}
+	isAllowedUser := false
+	for _, u := range allowedUsers {
+		if executingUser == u {
+			isAllowedUser = true
+			break
+		}
+	}
+	if !isAllowedUser {
+		securityWarning = fmt.Sprintf("Running as unexpected user '%s' (expected one of: %v)",
+			executingUser, allowedUsers)
+		log.Printf("Warning: %s", securityWarning)
+	}
+
+	// SECURITY: Set PR_SET_NO_NEW_PRIVS to prevent privilege escalation via setuid binaries.
+	// This is Linux-specific (kernel 3.5+); silently skip on other platforms.
+	setNoNewPrivs()
+
+	// SECURITY: Prepare minimal execution environment.
+	// Do not inherit arbitrary environment variables from parent process.
+	// This limits what an attacker can exploit via environment manipulation.
+	minimalEnv := []string{
+		"PATH=/usr/bin:/bin",
+		"HOME=/var/lib/croncommander",
+		"LANG=C.UTF-8",
+		"LC_ALL=C.UTF-8",
+	}
+
+	// SECURITY: Use a controlled working directory.
+	// Jobs execute in a known location with restrictive permissions.
+	workDir := "/var/lib/croncommander"
+
 	// Execute the command
 	startTime := time.Now()
-	
+
 	stdout := newLimitedBuffer()
 	stderr := newLimitedBuffer()
 	execCmd := exec.Command(commandArgs[0], commandArgs[1:]...)
 	execCmd.Stdout = stdout
 	execCmd.Stderr = stderr
-	
-	err := execCmd.Run()
-	
+	execCmd.Env = minimalEnv
+	execCmd.Dir = workDir
+
+	err = execCmd.Run()
+
 	duration := time.Since(startTime)
 	exitCode := 0
-	
+
 	if err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			exitCode = exitError.ExitCode()
@@ -67,16 +125,25 @@ func runExec(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Create execution report
+	// Create execution report with full audit information.
+	// SECURITY: Log exact command, timestamp, UID, and exit status for auditability.
+	// Commands are NOT redacted or rewritten.
 	report := protocol.ExecutionReportPayload{
-		JobID:      execJobID,
-		Command:    strings.Join(commandArgs, " "),
-		ExitCode:   exitCode,
-		Stdout:     stdout.String(),
-		Stderr:     stderr.String(),
-		StartTime:  startTime.Format(time.RFC3339),
-		DurationMs: int(duration.Milliseconds()),
+		JobID:         execJobID,
+		Command:       strings.Join(commandArgs, " "),
+		ExitCode:      exitCode,
+		ExecutingUID:  executingUID,
+		ExecutingUser: executingUser,
+		Warning:       securityWarning,
+		Stdout:        stdout.String(),
+		Stderr:        stderr.String(),
+		StartTime:     startTime.Format(time.RFC3339),
+		DurationMs:    int(duration.Milliseconds()),
 	}
+
+	// Log for local audit trail
+	log.Printf("Job executed: job=%s user=%s uid=%d exit=%d cmd=%q",
+		execJobID, executingUser, executingUID, exitCode, report.Command)
 
 	// Send to daemon via Unix socket
 	if err := sendToDaemon(report); err != nil {
@@ -86,6 +153,7 @@ func runExec(cmd *cobra.Command, args []string) {
 	// Exit with the same code as the wrapped command
 	os.Exit(exitCode)
 }
+
 
 func sendToDaemon(report protocol.ExecutionReportPayload) error {
 	conn, err := net.Dial("unix", socketPath)
