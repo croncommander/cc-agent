@@ -48,7 +48,7 @@ func runExec(cmd *cobra.Command, args []string) {
 	startTime := time.Now()
 	
 	// Capture output with size limit to prevent DoS/OOM
-	stdout := newLimitedBuffer(0) // 0 uses default limit (1MB)
+	stdout := newLimitedBuffer(0) // 0 uses default limit (256KB)
 	stderr := newLimitedBuffer(0)
 
 	execCmd := exec.Command(commandArgs[0], commandArgs[1:]...)

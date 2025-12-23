@@ -4,7 +4,7 @@ import (
 	"bytes"
 )
 
-const defaultMaxOutputSize = 1 * 1024 * 1024 // 1MB
+const defaultMaxOutputSize = 256 * 1024 // 256KB
 
 type limitedBuffer struct {
 	buf       bytes.Buffer
