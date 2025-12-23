@@ -292,9 +292,9 @@ func generateCronContent(jobs []protocol.JobDefinition) []byte {
 		// We shell-quote the JobID and wrap the command in /bin/sh -c (quoted) to prevent shell injection.
 		buf.WriteString(job.CronExpression)
 		buf.WriteString(" ccrunner /usr/local/bin/cc-agent exec --job-id ")
-		buf.WriteString(shellQuote(job.JobID))
+		writeShellQuote(&buf, job.JobID)
 		buf.WriteString(" -- /bin/sh -c ")
-		buf.WriteString(shellQuote(job.Command))
+		writeShellQuote(&buf, job.Command)
 		buf.WriteByte('\n')
 	}
 	return buf.Bytes()
@@ -304,13 +304,38 @@ func containsNewline(s string) bool {
 	return strings.ContainsAny(s, "\n\r")
 }
 
+// writeShellQuote writes a quoted string to the buffer for safe use in a shell command.
+// It avoids intermediate string allocations compared to shellQuote.
+func writeShellQuote(buf *bytes.Buffer, s string) {
+	if s == "" {
+		buf.WriteString("''")
+		return
+	}
+	buf.WriteByte('\'')
+	// Manually iterate to avoid strings.ReplaceAll allocation if possible,
+	// but strings.ReplaceAll is already optimized for this.
+	// However, we want to write directly to buffer.
+	// Since strings.ReplaceAll returns a new string, let's implement a loop.
+	last := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\'' {
+			buf.WriteString(s[last:i])
+			buf.WriteString("'\\''")
+			last = i + 1
+		}
+	}
+	buf.WriteString(s[last:])
+	buf.WriteByte('\'')
+}
+
 // shellQuote quotes a string for safe use in a shell command.
 // It uses single quotes and escapes existing single quotes.
+// Kept for backward compatibility if used elsewhere, or tests.
 func shellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+	var buf bytes.Buffer
+	buf.Grow(len(s) + 2)
+	writeShellQuote(&buf, s)
+	return buf.String()
 }
 
 func (d *daemon) syncCronFile(jobs []protocol.JobDefinition) {
