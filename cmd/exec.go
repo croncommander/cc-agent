@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -48,10 +47,11 @@ func runExec(cmd *cobra.Command, args []string) {
 	// Execute the command
 	startTime := time.Now()
 	
-	var stdout, stderr bytes.Buffer
+	stdout := newLimitedBuffer()
+	stderr := newLimitedBuffer()
 	execCmd := exec.Command(commandArgs[0], commandArgs[1:]...)
-	execCmd.Stdout = &stdout
-	execCmd.Stderr = &stderr
+	execCmd.Stdout = stdout
+	execCmd.Stderr = stderr
 	
 	err := execCmd.Run()
 	
