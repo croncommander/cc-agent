@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"bytes"
+	"strings"
 )
 
 const maxBufferSize = 256 * 1024 // 256KB
@@ -56,7 +56,37 @@ func (lb *limitedBuffer) Write(p []byte) (n int, err error) {
 }
 
 func (lb *limitedBuffer) WriteString(s string) (n int, err error) {
-	return lb.Write([]byte(s))
+	// Optimization: copy directly from string to slice to avoid []byte(s) allocation
+	n = len(s)
+	if n == 0 {
+		return 0, nil
+	}
+
+	cap := len(lb.buf)
+
+	if n >= cap {
+		lb.isWrapped = true
+		copy(lb.buf, s[n-cap:])
+		lb.writePos = 0
+		return n, nil
+	}
+
+	remaining := cap - lb.writePos
+	if n <= remaining {
+		copy(lb.buf[lb.writePos:], s)
+		lb.writePos += n
+		if lb.writePos == cap {
+			lb.writePos = 0
+			lb.isWrapped = true
+		}
+	} else {
+		lb.isWrapped = true
+		copy(lb.buf[lb.writePos:], s[:remaining])
+		copy(lb.buf[0:], s[remaining:])
+		lb.writePos = n - remaining
+	}
+
+	return n, nil
 }
 
 func (lb *limitedBuffer) String() string {
@@ -64,8 +94,11 @@ func (lb *limitedBuffer) String() string {
 		return string(lb.buf[:lb.writePos])
 	}
 
-	var builder bytes.Buffer
-	builder.WriteString("... output truncated ...")
+	var builder strings.Builder
+	truncatedMsg := "... output truncated ..."
+	// Pre-allocate to avoid reallocations
+	builder.Grow(len(truncatedMsg) + len(lb.buf))
+	builder.WriteString(truncatedMsg)
 
 	// Write the oldest data first (from writePos to end)
 	builder.Write(lb.buf[lb.writePos:])
