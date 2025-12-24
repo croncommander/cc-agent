@@ -156,7 +156,7 @@ func runExec(cmd *cobra.Command, args []string) {
 
 
 func sendToDaemon(report protocol.ExecutionReportPayload) error {
-	conn, err := net.Dial("unix", socketPath)
+	conn, err := net.Dial("unix", getSocketPath())
 	if err != nil {
 		return fmt.Errorf("failed to connect to daemon socket: %w", err)
 	}

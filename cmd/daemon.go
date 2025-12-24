@@ -23,7 +23,6 @@ import (
 )
 
 const (
-	socketPath         = "/tmp/croncommander.sock"
 	cronFilePath       = "/etc/cron.d/croncommander"
 	heartbeatInterval  = 60 * time.Second
 	reconnectDelay     = 5 * time.Second
@@ -386,6 +385,9 @@ func (d *daemon) sendMessage(msg interface{}) error {
 }
 
 func (d *daemon) startSocketListener() {
+	// Determine socket path
+	socketPath := getSocketPath()
+
 	// Remove existing socket
 	os.Remove(socketPath)
 
