@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"bytes"
+	"strings"
 )
 
 const maxBufferSize = 256 * 1024 // 256KB
@@ -55,8 +55,43 @@ func (lb *limitedBuffer) Write(p []byte) (n int, err error) {
 	return n, nil
 }
 
+// WriteString implements io.StringWriter and writes the string to the buffer
+// without intermediate []byte allocation.
 func (lb *limitedBuffer) WriteString(s string) (n int, err error) {
-	return lb.Write([]byte(s))
+	n = len(s)
+	if n == 0 {
+		return 0, nil
+	}
+
+	cap := len(lb.buf)
+
+	// If the write is larger than the buffer, we only keep the last cap bytes
+	if n >= cap {
+		lb.isWrapped = true
+		copy(lb.buf, s[n-cap:])
+		lb.writePos = 0 // Next write starts at the beginning
+		return n, nil
+	}
+
+	// Calculate how much we can write before reaching the end of the buffer
+	remaining := cap - lb.writePos
+	if n <= remaining {
+		// No wrap-around needed during this write
+		copy(lb.buf[lb.writePos:], s)
+		lb.writePos += n
+		if lb.writePos == cap {
+			lb.writePos = 0
+			lb.isWrapped = true
+		}
+	} else {
+		// Wrap-around needed
+		lb.isWrapped = true
+		copy(lb.buf[lb.writePos:], s[:remaining])
+		copy(lb.buf[0:], s[remaining:])
+		lb.writePos = n - remaining
+	}
+
+	return n, nil
 }
 
 func (lb *limitedBuffer) String() string {
@@ -64,7 +99,8 @@ func (lb *limitedBuffer) String() string {
 		return string(lb.buf[:lb.writePos])
 	}
 
-	var builder bytes.Buffer
+	var builder strings.Builder
+	builder.Grow(maxBufferSize + 25) // Pre-allocate to avoid re-allocations
 	builder.WriteString("... output truncated ...")
 
 	// Write the oldest data first (from writePos to end)
