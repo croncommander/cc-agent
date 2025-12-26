@@ -23,7 +23,8 @@ import (
 )
 
 const (
-	socketPath         = "/tmp/croncommander.sock"
+	// secureSocketDir is the directory where the socket should be in production
+	secureSocketDir    = "/var/lib/croncommander"
 	cronFilePath       = "/etc/cron.d/croncommander"
 	heartbeatInterval  = 60 * time.Second
 	reconnectDelay     = 5 * time.Second
@@ -34,6 +35,8 @@ var (
 	daemonKey        string
 	daemonServer     string
 	daemonConfigFile string
+	// socketPath is determined at runtime to support both prod (secure) and dev (tmp) environments.
+	socketPath = getSocketPath()
 )
 
 var daemonCmd = &cobra.Command{
@@ -52,6 +55,20 @@ func init() {
 	daemonCmd.Flags().StringVarP(&daemonKey, "key", "k", "", "Workspace API key")
 	daemonCmd.Flags().StringVarP(&daemonServer, "server", "s", "ws://localhost:8081/agent", "WebSocket server URL")
 	daemonCmd.Flags().StringVarP(&daemonConfigFile, "config", "c", "/etc/croncommander/config.yaml", "Path to config file")
+}
+
+// getSocketPath determines the socket path based on environment.
+func getSocketPath() string {
+	return getSocketPathWithBase(secureSocketDir)
+}
+
+// getSocketPathWithBase is a helper for testing
+func getSocketPathWithBase(baseDir string) string {
+	if _, err := os.Stat(baseDir); err == nil {
+		return filepath.Join(baseDir, "cc-agent.sock")
+	}
+	// Fallback to temp dir for development/non-prod environments
+	return filepath.Join(os.TempDir(), "croncommander.sock")
 }
 
 // Config represents the agent configuration
@@ -386,7 +403,7 @@ func (d *daemon) sendMessage(msg interface{}) error {
 }
 
 func (d *daemon) startSocketListener() {
-	// Remove existing socket
+	// Remove existing socket if it exists
 	os.Remove(socketPath)
 
 	listener, err := net.Listen("unix", socketPath)
