@@ -13,14 +13,14 @@ func TestSocketPathLogic(t *testing.T) {
 	tmpDir := t.TempDir()
 	secureDir := filepath.Join(tmpDir, "secure")
 
-	// Case 1: Secure directory does not exist. Should fallback to temp.
+	// Case 1: Secure directory does not exist. Should NOT fallback.
 	// We need to inject the secure directory path into the function we are testing.
-	// So we need to refactor the code to allow this injection.
+	// The agent must fail secure (fail to start) rather than degrade to insecure /tmp.
 
 	path := getSocketPathWithBase(secureDir)
-	expectedFallback := filepath.Join(os.TempDir(), "croncommander.sock")
-	if path != expectedFallback {
-		t.Errorf("Expected fallback path %s, got %s", expectedFallback, path)
+	expectedSecure := filepath.Join(secureDir, "cc-agent.sock")
+	if path != expectedSecure {
+		t.Errorf("Expected secure path %s, got %s", expectedSecure, path)
 	}
 
 	// Case 2: Secure directory exists. Should use it.
@@ -29,8 +29,9 @@ func TestSocketPathLogic(t *testing.T) {
 	}
 
 	path = getSocketPathWithBase(secureDir)
-	expectedSecure := filepath.Join(secureDir, "cc-agent.sock")
-	if path != expectedSecure {
-		t.Errorf("Expected secure path %s, got %s", expectedSecure, path)
+	// Re-use expectedSecure variable if needed, or just use the same logic
+	expectedSecure2 := filepath.Join(secureDir, "cc-agent.sock")
+	if path != expectedSecure2 {
+		t.Errorf("Expected secure path %s, got %s", expectedSecure2, path)
 	}
 }
