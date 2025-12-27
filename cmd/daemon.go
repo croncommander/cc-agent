@@ -64,11 +64,11 @@ func getSocketPath() string {
 
 // getSocketPathWithBase is a helper for testing
 func getSocketPathWithBase(baseDir string) string {
-	if _, err := os.Stat(baseDir); err == nil {
-		return filepath.Join(baseDir, "cc-agent.sock")
-	}
-	// Fallback to temp dir for development/non-prod environments
-	return filepath.Join(os.TempDir(), "croncommander.sock")
+	// SECURITY: Always use the secure directory.
+	// We removed the implicit fallback to /tmp because it allows local socket hijacking
+	// or information disclosure if the secure directory is missing or misconfigured.
+	// The agent should fail to start (fail secure) rather than degrading to an insecure mode.
+	return filepath.Join(baseDir, "cc-agent.sock")
 }
 
 // Config represents the agent configuration
