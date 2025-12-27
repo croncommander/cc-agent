@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"bytes"
+	"strings"
 )
 
 const maxBufferSize = 256 * 1024 // 256KB
@@ -98,7 +98,7 @@ func (lb *limitedBuffer) String() string {
 		return string(lb.buf[:lb.writePos])
 	}
 
-	var builder bytes.Buffer
+	var builder strings.Builder
 	// Optimization: Pre-allocate buffer to avoid resizing
 	// Size = truncated msg len + buffer size
 	truncatedMsg := "... output truncated ..."
