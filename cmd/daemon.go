@@ -105,7 +105,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		apiKey:    apiKey,
 		serverURL: serverURL,
 		hostname:  getHostname(),
-		osType:    runtime.GOOS,
+		osType:    getOsInfo(),
 	}
 
 	// Start Unix socket listener for exec mode reports
@@ -154,6 +154,50 @@ func getHostname() string {
 		return "unknown"
 	}
 	return hostname
+}
+
+// getOsInfo returns a descriptive OS string.
+// On Linux, it reads /etc/os-release to get the distro name and version.
+// Falls back to runtime.GOOS if the file is not available.
+func getOsInfo() string {
+	if runtime.GOOS != "linux" {
+		return runtime.GOOS
+	}
+
+	// Try to read /etc/os-release
+	data, err := os.ReadFile("/etc/os-release")
+	if err != nil {
+		return runtime.GOOS
+	}
+
+	var name, version string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "NAME=") {
+			name = parseOsReleaseValue(line[5:])
+		} else if strings.HasPrefix(line, "VERSION=") {
+			version = parseOsReleaseValue(line[8:])
+		}
+	}
+
+	if name == "" {
+		return runtime.GOOS
+	}
+
+	if version != "" {
+		return name + " " + version
+	}
+	return name
+}
+
+// parseOsReleaseValue removes quotes from /etc/os-release values
+func parseOsReleaseValue(s string) string {
+	s = strings.TrimSpace(s)
+	// Remove surrounding quotes if present
+	if len(s) >= 2 && (s[0] == '"' || s[0] == '\'') {
+		s = s[1 : len(s)-1]
+	}
+	return s
 }
 
 type daemon struct {
