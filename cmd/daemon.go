@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/url"
@@ -485,8 +486,13 @@ func (d *daemon) startSocketListener() {
 func (d *daemon) handleSocketConnection(conn net.Conn) {
 	defer conn.Close()
 
+	// Security: Limit the size of the execution report to prevent DoS/OOM
+	// 1MB should be sufficient for standard execution reports including stdout/stderr
+	const maxReportSize = 1024 * 1024 // 1MB
+	limitedReader := io.LimitReader(conn, maxReportSize)
+
 	// Read execution report from exec mode
-	decoder := json.NewDecoder(conn)
+	decoder := json.NewDecoder(limitedReader)
 	var report protocol.ExecutionReportPayload
 	if err := decoder.Decode(&report); err != nil {
 		log.Printf("Failed to decode execution report: %v", err)

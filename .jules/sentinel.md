@@ -22,3 +22,8 @@ Metacharacter blocking is a classic "looks secure, breaks the product" change.
 Risk: When the secure directory (`/var/lib/croncommander`) was missing, the agent silently fell back to creating its IPC socket in `/tmp`. In multi-user environments, this allowed local attackers to pre-create the socket (DoS) or spoof the daemon to intercept execution reports containing sensitive job details (Information Disclosure).
 Learning: "Convenient" fallbacks in security-critical paths often create hidden "fail-open" vulnerabilities. Configuration errors (like a missing directory) should result in a hard failure ("Fail Secure") rather than a silent security downgrade.
 Action: Removed the implicit fallback to `/tmp`. The agent now strictly enforces the use of the secure directory and will fail to start if it is missing or inaccessible.
+
+## 2025-12-28 - Unbounded Read on IPC Socket
+Risk: The daemon's socket listener (`handleSocketConnection`) read data from the connection directly into `json.NewDecoder`. A malicious or malfunctioning local client could send an unlimited amount of data (or an infinite stream), causing the daemon to consume all available memory and crash (OOM DoS).
+Learning: Standard library decoders (like `json.Decoder`) do not impose size limits by default. When handling untrusted input—even from local sockets—you must explicitly bound the read size. `io.LimitReader` is a simple, composable way to enforce this at the stream level without complex logic.
+Action: Wrapped the socket connection in `io.LimitReader(conn, 1MB)` before passing it to the JSON decoder.
