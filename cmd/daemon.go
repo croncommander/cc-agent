@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/url"
@@ -278,10 +279,19 @@ func (d *daemon) messageLoop() {
 	heartbeatTicker := time.NewTicker(heartbeatInterval)
 	defer heartbeatTicker.Stop()
 
+	// Channel to signal the heartbeat goroutine to stop
+	stopHeartbeat := make(chan struct{})
+	defer close(stopHeartbeat)
+
 	go func() {
-		for range heartbeatTicker.C {
-			if err := d.sendMessage(protocol.HeartbeatMessage{Type: "heartbeat"}); err != nil {
-				log.Printf("Failed to send heartbeat: %v", err)
+		for {
+			select {
+			case <-heartbeatTicker.C:
+				if err := d.sendMessage(protocol.HeartbeatMessage{Type: "heartbeat"}); err != nil {
+					log.Printf("Failed to send heartbeat: %v", err)
+					return
+				}
+			case <-stopHeartbeat:
 				return
 			}
 		}
@@ -492,7 +502,12 @@ func (d *daemon) handleSocketConnection(conn net.Conn) {
 	defer conn.Close()
 
 	// Read execution report from exec mode
-	decoder := json.NewDecoder(conn)
+	// SECURITY: Limit the size of the request to prevent DoS (OOM) from a local attacker.
+	// 1MB is sufficient for legitimate reports (256KB stdout + 256KB stderr + metadata).
+	const maxReportSize = 1024 * 1024 // 1MB
+	limitReader := io.LimitReader(conn, maxReportSize)
+
+	decoder := json.NewDecoder(limitReader)
 	var report protocol.ExecutionReportPayload
 	if err := decoder.Decode(&report); err != nil {
 		log.Printf("Failed to decode execution report: %v", err)
