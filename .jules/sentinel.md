@@ -23,6 +23,10 @@ Risk: When the secure directory (`/var/lib/croncommander`) was missing, the agen
 Learning: "Convenient" fallbacks in security-critical paths often create hidden "fail-open" vulnerabilities. Configuration errors (like a missing directory) should result in a hard failure ("Fail Secure") rather than a silent security downgrade.
 Action: Removed the implicit fallback to `/tmp`. The agent now strictly enforces the use of the secure directory and will fail to start if it is missing or inaccessible.
 
+## 2025-12-29 - Socket Creation Race Condition
+Risk: The `net.Listen` function creates the socket file using the process's default umask (often `0022` or `0002`). This creates a small window where the socket file might be accessible to unauthorized users before `os.Chmod` is called to restrict permissions. In environments with shared groups or permissive umasks, this could allow local attackers to connect to the socket.
+Learning: `net.Listen` does not accept permissions as an argument. Relying on a subsequent `os.Chmod` introduces a Time-of-Check Time-of-Use (TOCTOU) vulnerability. The only atomic way to control file creation permissions in standard Go `net` package is to modify the process `umask` prior to the call.
+Action: Wrap `net.Listen` with `syscall.Umask(0117)` to strictly enforce `0660` permissions at the moment of creation, then restore the original umask.
 ## 2025-12-27 - Unbounded Socket Read DoS (OOM)
 Risk: The daemon's internal socket listener (`handleSocketConnection`) read unlimited data from incoming connections before unmarshalling JSON. A local authenticated attacker (e.g., a compromised `ccrunner` user) could cause a Denial of Service (DoS) by sending a massive payload (e.g., gigabytes of data), forcing the daemon to allocate excessive memory and potentially triggering an Out-Of-Memory (OOM) crash.
 Learning: Never trust the size of incoming data, even from "trusted" local users. `json.Decoder` reads from the stream until it finds a valid object or error, but it buffers data. Without an `io.LimitReader`, a decoder can be coerced into reading indefinitely.
