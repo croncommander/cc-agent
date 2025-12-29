@@ -278,8 +278,9 @@ func (d *daemon) messageLoop() {
 	heartbeatTicker := time.NewTicker(heartbeatInterval)
 	defer heartbeatTicker.Stop()
 
-	done := make(chan struct{})
-	defer close(done)
+	// Channel to signal the heartbeat goroutine to stop
+	stopHeartbeat := make(chan struct{})
+	defer close(stopHeartbeat)
 
 	go func() {
 		for {
@@ -289,7 +290,7 @@ func (d *daemon) messageLoop() {
 					log.Printf("Failed to send heartbeat: %v", err)
 					return
 				}
-			case <-done:
+			case <-stopHeartbeat:
 				return
 			}
 		}
