@@ -278,10 +278,19 @@ func (d *daemon) messageLoop() {
 	heartbeatTicker := time.NewTicker(heartbeatInterval)
 	defer heartbeatTicker.Stop()
 
+	// Channel to signal the heartbeat goroutine to stop
+	stopHeartbeat := make(chan struct{})
+	defer close(stopHeartbeat)
+
 	go func() {
-		for range heartbeatTicker.C {
-			if err := d.sendMessage(protocol.HeartbeatMessage{Type: "heartbeat"}); err != nil {
-				log.Printf("Failed to send heartbeat: %v", err)
+		for {
+			select {
+			case <-heartbeatTicker.C:
+				if err := d.sendMessage(protocol.HeartbeatMessage{Type: "heartbeat"}); err != nil {
+					log.Printf("Failed to send heartbeat: %v", err)
+					return
+				}
+			case <-stopHeartbeat:
 				return
 			}
 		}
