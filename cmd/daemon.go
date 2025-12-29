@@ -450,14 +450,20 @@ func (d *daemon) startSocketListener() {
 	// Remove existing socket if it exists
 	os.Remove(socketPath)
 
+	// SECURITY: Set umask to 0117 to ensure the socket is created with 0660 permissions (rw-rw----).
+	// This prevents a race condition where the socket could be briefly accessible to others
+	// (depending on the default umask) before os.Chmod is called.
+	oldUmask := syscall.Umask(0117)
 	listener, err := net.Listen("unix", socketPath)
+	syscall.Umask(oldUmask)
+
 	if err != nil {
 		log.Printf("Failed to create socket listener: %v", err)
 		return
 	}
 	defer listener.Close()
 
-	// Make socket writable by ccrunner group
+	// Explicitly ensure permissions are correct (redundant but safe)
 	os.Chmod(socketPath, 0660)
 
 	log.Printf("Listening on %s", socketPath)
