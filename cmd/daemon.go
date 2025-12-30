@@ -386,9 +386,15 @@ func containsNewline(s string) bool {
 	return strings.ContainsAny(s, "\n\r")
 }
 
+// stringByteWriter is an interface satisfied by both bytes.Buffer and strings.Builder
+type stringByteWriter interface {
+	WriteString(s string) (n int, err error)
+	WriteByte(c byte) error
+}
+
 // writeShellQuote writes a quoted string to the buffer for safe use in a shell command.
 // It avoids intermediate string allocations compared to shellQuote.
-func writeShellQuote(buf *bytes.Buffer, s string) {
+func writeShellQuote(buf stringByteWriter, s string) {
 	if s == "" {
 		buf.WriteString("''")
 		return
@@ -414,7 +420,7 @@ func writeShellQuote(buf *bytes.Buffer, s string) {
 // It uses single quotes and escapes existing single quotes.
 // Kept for backward compatibility if used elsewhere, or tests.
 func shellQuote(s string) string {
-	var buf bytes.Buffer
+	var buf strings.Builder
 	buf.Grow(len(s) + 2)
 	writeShellQuote(&buf, s)
 	return buf.String()
