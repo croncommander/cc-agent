@@ -74,6 +74,12 @@ func getSocketPath() string {
 	return filepath.Join(os.TempDir(), "cc-agent-"+os.Getenv("USER")+".sock")
 }
 
+// getSocketPathWithBase returns the socket path within the given base directory.
+// This is primarily exposed for testing to verify path construction logic.
+func getSocketPathWithBase(baseDir string) string {
+	return filepath.Join(baseDir, "cc-agent.sock")
+}
+
 // Config represents the agent configuration
 type Config struct {
 	ApiKey        string `yaml:"api_key"`
@@ -368,7 +374,7 @@ func (d *daemon) syncCron(jobs []protocol.JobDefinition) {
 }
 
 func (d *daemon) syncSystemCron(jobs []protocol.JobDefinition) {
-	content := d.generateCronContent(jobs, true)
+	content := generateCronContent(jobs, true)
 
 	// Write atomically to /etc/cron.d/croncommander
 	tmpFile := cronFilePath + ".tmp"
@@ -386,7 +392,7 @@ func (d *daemon) syncSystemCron(jobs []protocol.JobDefinition) {
 }
 
 func (d *daemon) syncUserCron(jobs []protocol.JobDefinition) {
-	content := d.generateCronContent(jobs, false)
+	content := generateCronContent(jobs, false)
 
 	// Use 'crontab -' to install
 	cmd := exec.Command("crontab", "-")
@@ -399,7 +405,7 @@ func (d *daemon) syncUserCron(jobs []protocol.JobDefinition) {
 	log.Printf("User crontab updated with %d jobs", len(jobs))
 }
 
-func (d *daemon) generateCronContent(jobs []protocol.JobDefinition, systemMode bool) []byte {
+func generateCronContent(jobs []protocol.JobDefinition, systemMode bool) []byte {
 	var buf bytes.Buffer
 	buf.Grow(len(jobs) * 100)
 
