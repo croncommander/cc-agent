@@ -15,9 +15,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-
 var (
-	execJobID string
+	execJobID      string
+	execSocketPath string
 )
 
 var execCmd = &cobra.Command{
@@ -29,14 +29,15 @@ to the daemon process via Unix socket.
 This command is designed to be called from cron, not by humans directly.
 
 Example:
-  cc-agent exec --job-id abc123 -- /path/to/script.sh arg1 arg2`,
-	Run:               runExec,
+  cc-agent exec --job-id abc123 --socket-path /var/lib/croncommander/cc-agent.sock -- /path/to/script.sh arg1 arg2`,
+	Run:                runExec,
 	DisableFlagParsing: false,
 }
 
 func init() {
 	rootCmd.AddCommand(execCmd)
 	execCmd.Flags().StringVarP(&execJobID, "job-id", "j", "", "Job ID for this execution")
+	execCmd.Flags().StringVar(&execSocketPath, "socket-path", "", "Path to daemon socket")
 }
 
 func runExec(cmd *cobra.Command, args []string) {
@@ -57,18 +58,16 @@ func runExec(cmd *cobra.Command, args []string) {
 		executingUser = currentUser.Username
 	}
 
-	// SECURITY: Fail fast if running as root (UID 0).
-	// Running jobs as root defeats privilege separation and increases RCE impact.
+	// SECURITY: Warn if running as root, but allow it for System Mode.
+	// In System Mode, jobs may legitimately run as root.
 	if executingUID == 0 {
-		fmt.Fprintln(os.Stderr, "Error: cc-agent exec must not run as root (UID 0)")
-		fmt.Fprintln(os.Stderr, "Jobs should execute as an unprivileged user (e.g., ccrunner).")
-		fmt.Fprintln(os.Stderr, "See: https://croncommander.com/docs/security")
-		os.Exit(1)
+		securityWarning = "Running as root (UID 0). Ensure this is intentional (System Mode)."
+		log.Printf("Warning: %s", securityWarning)
 	}
 
 	// SECURITY: Warn if not running as an expected user.
 	// Configurable pool allows flexibility for different deployment environments.
-	allowedUsers := []string{"ccrunner", "ccagent-exec", "ccexec"}
+	allowedUsers := []string{"cc-agent-user", "root"}
 	isAllowedUser := false
 	for _, u := range allowedUsers {
 		if executingUser == u {
@@ -77,9 +76,13 @@ func runExec(cmd *cobra.Command, args []string) {
 		}
 	}
 	if !isAllowedUser {
-		securityWarning = fmt.Sprintf("Running as unexpected user '%s' (expected one of: %v)",
-			executingUser, allowedUsers)
-		log.Printf("Warning: %s", securityWarning)
+		msg := fmt.Sprintf("Running as unexpected user '%s' (expected one of: %v)", executingUser, allowedUsers)
+		if securityWarning != "" {
+			securityWarning += " | " + msg
+		} else {
+			securityWarning = msg
+		}
+		log.Printf("Warning: %s", msg)
 	}
 
 	// SECURITY: Set PR_SET_NO_NEW_PRIVS to prevent privilege escalation via setuid binaries.
@@ -154,9 +157,12 @@ func runExec(cmd *cobra.Command, args []string) {
 	os.Exit(exitCode)
 }
 
-
 func sendToDaemon(report protocol.ExecutionReportPayload) error {
-	conn, err := net.Dial("unix", socketPath)
+	path := socketPath
+	if execSocketPath != "" {
+		path = execSocketPath
+	}
+	conn, err := net.Dial("unix", path)
 	if err != nil {
 		return fmt.Errorf("failed to connect to daemon socket: %w", err)
 	}

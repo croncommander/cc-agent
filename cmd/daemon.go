@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -25,11 +26,11 @@ import (
 
 const (
 	// secureSocketDir is the directory where the socket should be in production
-	secureSocketDir    = "/var/lib/croncommander"
-	cronFilePath       = "/etc/cron.d/croncommander"
-	heartbeatInterval  = 60 * time.Second
-	reconnectDelay     = 5 * time.Second
-	maxReconnectDelay  = 60 * time.Second
+	secureSocketDir   = "/var/lib/croncommander"
+	cronFilePath      = "/etc/cron.d/croncommander"
+	heartbeatInterval = 60 * time.Second
+	reconnectDelay    = 5 * time.Second
+	maxReconnectDelay = 60 * time.Second
 )
 
 var (
@@ -49,7 +50,7 @@ var daemonCmd = &cobra.Command{
 	Long: `Run the cc-agent as a background daemon that:
   - Maintains a WebSocket connection to the CronCommander server
   - Receives job synchronization commands
-  - Updates /etc/cron.d/croncommander with managed jobs
+  - Updates cron configuration (User crontab or System /etc/cron.d)
   - Listens for execution reports from exec mode`,
 	Run: runDaemon,
 }
@@ -63,31 +64,40 @@ func init() {
 
 // getSocketPath determines the socket path based on environment.
 func getSocketPath() string {
-	return getSocketPathWithBase(secureSocketDir)
+	// In System Mode (root), use global secure dir.
+	// In User Mode, use user's runtime dir or tmp.
+	if os.Geteuid() == 0 {
+		return filepath.Join(secureSocketDir, "cc-agent.sock")
+	}
+	// Fallback for non-root: use XDG_RUNTIME_DIR or tmp
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if runtimeDir != "" {
+		return filepath.Join(runtimeDir, "cc-agent.sock")
+	}
+	return filepath.Join(os.TempDir(), "cc-agent-"+os.Getenv("USER")+".sock")
 }
 
-// getSocketPathWithBase is a helper for testing
+// getSocketPathWithBase returns the socket path within the given base directory.
+// This is primarily exposed for testing to verify path construction logic.
 func getSocketPathWithBase(baseDir string) string {
-	// SECURITY: Always use the secure directory.
-	// We removed the implicit fallback to /tmp because it allows local socket hijacking
-	// or information disclosure if the secure directory is missing or misconfigured.
-	// The agent should fail to start (fail secure) rather than degrading to an insecure mode.
 	return filepath.Join(baseDir, "cc-agent.sock")
 }
 
 // Config represents the agent configuration
 type Config struct {
-	ApiKey    string `yaml:"api_key"`
-	ServerURL string `yaml:"server_url"`
+	ApiKey        string `yaml:"api_key"`
+	ServerURL     string `yaml:"server_url"`
+	ExecutionMode string `yaml:"execution_mode"` // "user" (default) or "system"
 }
 
 func runDaemon(cmd *cobra.Command, args []string) {
 	// Load config
 	config := loadConfig()
-	
+
 	apiKey := daemonKey
 	serverURL := daemonServer
-	
+	executionMode := "user"
+
 	if config != nil {
 		if apiKey == "" {
 			apiKey = config.ApiKey
@@ -95,21 +105,33 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		if serverURL == "ws://localhost:8081/agent" && config.ServerURL != "" {
 			serverURL = config.ServerURL
 		}
+		if config.ExecutionMode != "" {
+			executionMode = config.ExecutionMode
+		}
 	}
 
 	if apiKey == "" {
 		log.Fatal("API key is required. Use --key flag or set api_key in config file")
 	}
 
+	// Validation: System mode requires root
+	isRoot := os.Geteuid() == 0
+	if executionMode == "system" && !isRoot {
+		log.Fatal("Execution mode 'system' requires root privileges. Please run as root or switch to 'user' mode.")
+	}
+
 	log.Printf("CronCommander Agent starting...")
 	log.Printf("Server: %s", serverURL)
+	log.Printf("Mode: %s (Root: %v)", executionMode, isRoot)
 
 	// Create daemon instance
 	d := &daemon{
-		apiKey:    apiKey,
-		serverURL: serverURL,
-		hostname:  getHostname(),
-		osType:    getOsInfo(),
+		apiKey:        apiKey,
+		serverURL:     serverURL,
+		hostname:      getHostname(),
+		osType:        getOsInfo(),
+		executionMode: executionMode,
+		isRoot:        isRoot,
 	}
 
 	// Start Unix socket listener for exec mode reports
@@ -205,14 +227,16 @@ func parseOsReleaseValue(s string) string {
 }
 
 type daemon struct {
-	apiKey    string
-	serverURL string
-	hostname  string
-	osType    string
-	agentID   string
-	conn      *websocket.Conn
-	connMu    sync.Mutex
-	shutdown  func()
+	apiKey        string
+	serverURL     string
+	hostname      string
+	osType        string
+	executionMode string
+	isRoot        bool
+	agentID       string
+	conn          *websocket.Conn
+	connMu        sync.Mutex
+	shutdown      func()
 }
 
 func (d *daemon) run() {
@@ -223,7 +247,7 @@ func (d *daemon) run() {
 		if err != nil {
 			log.Printf("Connection failed: %v. Reconnecting in %v...", err, currentDelay)
 			time.Sleep(currentDelay)
-			
+
 			// Exponential backoff
 			currentDelay *= 2
 			if currentDelay > maxReconnectDelay {
@@ -262,10 +286,12 @@ func (d *daemon) connect() error {
 
 	// Send registration
 	regMsg := protocol.RegisterMessage{
-		Type:     "register",
-		ApiKey:   d.apiKey,
-		Hostname: d.hostname,
-		Os:       d.osType,
+		Type:          "register",
+		ApiKey:        d.apiKey,
+		Hostname:      d.hostname,
+		Os:            d.osType,
+		ExecutionMode: d.executionMode,
+		IsRoot:        d.isRoot,
 	}
 
 	if err := d.sendMessage(regMsg); err != nil {
@@ -282,7 +308,6 @@ func (d *daemon) messageLoop() {
 	heartbeatTicker := time.NewTicker(heartbeatInterval)
 	defer heartbeatTicker.Stop()
 
-	// Channel to signal the heartbeat goroutine to stop
 	stopHeartbeat := make(chan struct{})
 	defer close(stopHeartbeat)
 
@@ -313,7 +338,6 @@ func (d *daemon) messageLoop() {
 }
 
 func (d *daemon) handleMessage(data []byte) {
-	// Optimization: Use UnifiedMessage to unmarshal only once
 	var msg UnifiedMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
 		log.Printf("Failed to parse message: %v", err)
@@ -334,7 +358,7 @@ func (d *daemon) handleMessage(data []byte) {
 
 	case "sync_jobs":
 		log.Printf("Received sync_jobs with %d jobs", len(msg.Jobs))
-		d.syncCronFile(msg.Jobs)
+		d.syncCron(msg.Jobs)
 
 	case "error":
 		log.Printf("Server error: %s", msg.Reason)
@@ -344,90 +368,18 @@ func (d *daemon) handleMessage(data []byte) {
 	}
 }
 
-func generateCronContent(jobs []protocol.JobDefinition) []byte {
-	// Pre-allocate buffer to reduce allocations.
-	// Estimated line length ~100 bytes: cron(15) + boilerplate(45) + id(10) + cmd(30)
-	//
-	// SECURITY NOTE: Commands are passed verbatim to execution. We intentionally
-	// do NOT filter shell metacharacters (;, |, &&, ||, $(), `, >, <, etc.) because:
-	//   1. Such filtering provides weak security guarantees (easily bypassed)
-	//   2. It breaks legitimate automation workflows (pipes, conditionals, redirects)
-	//   3. Security is enforced via execution context:
-	//      - Unprivileged ccrunner user (no root, no sudo)
-	//      - Minimal environment (limited PATH, no inherited vars)
-	//      - PR_SET_NO_NEW_PRIVS (prevents setuid escalation on Linux)
-	// Shell quoting via writeShellQuote() prevents injection into cron syntax only.
-	var buf bytes.Buffer
-	buf.Grow(len(jobs) * 100)
-
-
-	buf.WriteString("# CronCommander managed cron jobs\n")
-	buf.WriteString("# Do not edit this file manually\n")
-	buf.WriteString("SHELL=/bin/bash\n")
-	buf.WriteString("PATH=/usr/local/bin:/usr/bin:/bin\n\n")
-
-	for _, job := range jobs {
-		// Validate inputs to prevent cron injection
-		if containsNewline(job.CronExpression) || containsNewline(job.JobID) || containsNewline(job.Command) {
-			log.Printf("Skipping job %q: contains invalid characters (newlines)", job.JobID)
-			continue
-		}
-
-		// Format: <cronExpression> ccrunner /usr/local/bin/cc-agent exec --job-id <jobId> -- <command>
-		// We shell-quote the JobID and wrap the command in /bin/sh -c (quoted) to prevent shell injection.
-		buf.WriteString(job.CronExpression)
-		buf.WriteString(" ccrunner /usr/local/bin/cc-agent exec --job-id ")
-		writeShellQuote(&buf, job.JobID)
-		buf.WriteString(" -- /bin/sh -c ")
-		writeShellQuote(&buf, job.Command)
-		buf.WriteByte('\n')
+func (d *daemon) syncCron(jobs []protocol.JobDefinition) {
+	if d.executionMode == "system" {
+		d.syncSystemCron(jobs)
+	} else {
+		d.syncUserCron(jobs)
 	}
-	return buf.Bytes()
 }
 
-func containsNewline(s string) bool {
-	return strings.ContainsAny(s, "\n\r")
-}
+func (d *daemon) syncSystemCron(jobs []protocol.JobDefinition) {
+	content := generateCronContent(jobs, true)
 
-// writeShellQuote writes a quoted string to the buffer for safe use in a shell command.
-// It avoids intermediate string allocations compared to shellQuote.
-func writeShellQuote(buf *bytes.Buffer, s string) {
-	if s == "" {
-		buf.WriteString("''")
-		return
-	}
-	buf.WriteByte('\'')
-	// Manually iterate to avoid strings.ReplaceAll allocation if possible,
-	// but strings.ReplaceAll is already optimized for this.
-	// However, we want to write directly to buffer.
-	// Since strings.ReplaceAll returns a new string, let's implement a loop.
-	last := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\'' {
-			buf.WriteString(s[last:i])
-			buf.WriteString("'\\''")
-			last = i + 1
-		}
-	}
-	buf.WriteString(s[last:])
-	buf.WriteByte('\'')
-}
-
-// shellQuote quotes a string for safe use in a shell command.
-// It uses single quotes and escapes existing single quotes.
-// Kept for backward compatibility if used elsewhere, or tests.
-func shellQuote(s string) string {
-	var buf bytes.Buffer
-	buf.Grow(len(s) + 2)
-	writeShellQuote(&buf, s)
-	return buf.String()
-}
-
-func (d *daemon) syncCronFile(jobs []protocol.JobDefinition) {
-	// Generate cron file content
-	content := generateCronContent(jobs)
-
-	// Write atomically
+	// Write atomically to /etc/cron.d/croncommander
 	tmpFile := cronFilePath + ".tmp"
 	if err := os.WriteFile(tmpFile, content, 0644); err != nil {
 		log.Printf("Failed to write cron file: %v", err)
@@ -439,8 +391,91 @@ func (d *daemon) syncCronFile(jobs []protocol.JobDefinition) {
 		os.Remove(tmpFile)
 		return
 	}
+	log.Printf("System cron file updated with %d jobs", len(jobs))
+}
 
-	log.Printf("Cron file updated with %d jobs", len(jobs))
+func (d *daemon) syncUserCron(jobs []protocol.JobDefinition) {
+	content := generateCronContent(jobs, false)
+
+	// Use 'crontab -' to install
+	cmd := exec.Command("crontab", "-")
+	cmd.Stdin = bytes.NewReader(content)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Failed to update user crontab: %v. Output: %s", err, output)
+		return
+	}
+	log.Printf("User crontab updated with %d jobs", len(jobs))
+}
+
+func generateCronContent(jobs []protocol.JobDefinition, systemMode bool) []byte {
+	var buf bytes.Buffer
+	buf.Grow(len(jobs) * 100)
+
+	buf.WriteString("# CronCommander managed cron jobs\n")
+	buf.WriteString("# Do not edit this file manually\n")
+	buf.WriteString("SHELL=/bin/bash\n")
+	buf.WriteString("PATH=/usr/local/bin:/usr/bin:/bin\n\n")
+
+	for _, job := range jobs {
+		if containsNewline(job.CronExpression) || containsNewline(job.JobID) || containsNewline(job.Command) {
+			log.Printf("Skipping job %q: contains invalid characters", job.JobID)
+			continue
+		}
+
+		// User mode: <cron> command
+		// System mode: <cron> <user> command
+
+		buf.WriteString(job.CronExpression)
+		buf.WriteByte(' ')
+
+		if systemMode {
+			// In system mode, run jobs as root (for this MVP) since we don't have per-job user config.
+			buf.WriteString("root ")
+		}
+
+		// Self-executable path
+		execPath, err := os.Executable()
+		if err != nil {
+			execPath = "/usr/local/bin/cc-agent"
+		}
+
+		buf.WriteString(execPath)
+		buf.WriteString(" exec --job-id ")
+		writeShellQuote(&buf, job.JobID)
+
+		// Always pass the socket path explicitly to ensure the job finds the daemon
+		// regardless of the user execution context (e.g. non-root job -> root daemon).
+		buf.WriteString(" --socket-path ")
+		writeShellQuote(&buf, socketPath)
+
+		buf.WriteString(" -- /bin/sh -c ")
+		writeShellQuote(&buf, job.Command)
+		buf.WriteByte('\n')
+	}
+	return buf.Bytes()
+}
+
+func containsNewline(s string) bool {
+	return strings.ContainsAny(s, "\n\r")
+}
+
+func writeShellQuote(buf *bytes.Buffer, s string) {
+	if s == "" {
+		buf.WriteString("''")
+		return
+	}
+	buf.WriteByte('\'')
+	last := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\'' {
+			buf.WriteString(s[last:i])
+			buf.WriteString("'\\''")
+			last = i + 1
+		}
+	}
+	buf.WriteString(s[last:])
+	buf.WriteByte('\'')
 }
 
 func (d *daemon) sendMessage(msg interface{}) error {
@@ -460,12 +495,8 @@ func (d *daemon) sendMessage(msg interface{}) error {
 }
 
 func (d *daemon) startSocketListener() {
-	// Remove existing socket if it exists
 	os.Remove(socketPath)
 
-	// SECURITY: Set umask to 0117 to ensure the socket is created with 0660 permissions (rw-rw----).
-	// This prevents a race condition where the socket could be briefly accessible to others
-	// (depending on the default umask) before os.Chmod is called.
 	oldUmask := syscall.Umask(0117)
 	listener, err := net.Listen("unix", socketPath)
 	syscall.Umask(oldUmask)
@@ -476,7 +507,8 @@ func (d *daemon) startSocketListener() {
 	}
 	defer listener.Close()
 
-	// Explicitly ensure permissions are correct (redundant but safe)
+	// In user mode, 0660 is fine for user/group access.
+	// In system mode, it's in /var/lib/croncommander.
 	os.Chmod(socketPath, 0660)
 
 	log.Printf("Listening on %s", socketPath)
@@ -528,7 +560,6 @@ func (d *daemon) handleSocketConnection(conn net.Conn) {
 
 	log.Printf("Received execution report: job=%s, exitCode=%d", report.JobID, report.ExitCode)
 
-	// Forward to WebSocket
 	msg := protocol.ExecutionReportMessage{
 		Type:    "execution_report",
 		Payload: report,

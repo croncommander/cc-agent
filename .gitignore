@@ -1,0 +1,7 @@
+# Build artifacts
+bin/
+releases/
+
+# OS specific checks
+.DS_Store
+Thumbs.db
