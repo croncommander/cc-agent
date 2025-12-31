@@ -32,7 +32,7 @@ func TestGenerateCronContent_Sanitization(t *testing.T) {
 	}
 	jobs[3].JobID = "job\nid"
 
-	content := generateCronContent(jobs, false)
+	content := generateCronContent(jobs, false, "/tmp/mock.sock")
 	output := string(content)
 
 	// The malicious jobs should be skipped.
@@ -70,7 +70,7 @@ func TestGenerateCronContent_CommandInjection(t *testing.T) {
 		},
 	}
 
-	content := generateCronContent(jobs, false)
+	content := generateCronContent(jobs, false, "/tmp/mock.sock")
 	output := string(content)
 
 	// Expected output for command injection:

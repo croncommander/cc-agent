@@ -37,8 +37,9 @@ var (
 	daemonKey        string
 	daemonServer     string
 	daemonConfigFile string
-	// socketPath is determined at runtime to support both prod (secure) and dev (tmp) environments.
-	socketPath = getSocketPath()
+	// defaultSocketPath is the fallback socket path determined at runtime.
+	// It is used by the 'exec' command if no socket path is provided.
+	defaultSocketPath = getSocketPath()
 	// socketReadTimeout prevents Slowloris-style DoS attacks on the unix socket.
 	// It is a variable to allow overriding in tests.
 	socketReadTimeout = 5 * time.Second
@@ -81,6 +82,36 @@ func getSocketPath() string {
 // This is primarily exposed for testing to verify path construction logic.
 func getSocketPathWithBase(baseDir string) string {
 	return filepath.Join(baseDir, "cc-agent.sock")
+}
+
+// determineSocketPath calculates a secure path for the unix socket.
+// It returns the socket path, a cleanup function, and any error.
+func determineSocketPath() (string, func(), error) {
+	// 1. Root User -> /var/lib/croncommander/cc-agent.sock
+	if os.Geteuid() == 0 {
+		return filepath.Join(secureSocketDir, "cc-agent.sock"), func() {}, nil
+	}
+
+	// 2. XDG_RUNTIME_DIR -> $XDG_RUNTIME_DIR/cc-agent.sock
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if runtimeDir != "" {
+		// Verify XDG_RUNTIME_DIR permissions if paranoid, but usually trusted.
+		return filepath.Join(runtimeDir, "cc-agent.sock"), func() {}, nil
+	}
+
+	// 3. Secure Fallback -> Create strict temp directory
+	// We avoid using raw os.TempDir() directly because it's shared and insecure.
+	// MkdirTemp creates a directory with 0700 permissions.
+	dir, err := os.MkdirTemp("", "cc-agent-runtime-")
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to create secure runtime dir: %w", err)
+	}
+
+	cleanup := func() {
+		os.RemoveAll(dir)
+	}
+
+	return filepath.Join(dir, "cc-agent.sock"), cleanup, nil
 }
 
 // Config represents the agent configuration
@@ -134,6 +165,13 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		isRoot:        isRoot,
 	}
 
+	// Determine secure socket path
+	socketPath, cleanup, err := determineSocketPath()
+	if err != nil {
+		log.Fatalf("Failed to determine secure socket path: %v", err)
+	}
+	d.socketPath = socketPath
+
 	// Start Unix socket listener for exec mode reports
 	go d.startSocketListener()
 
@@ -145,6 +183,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		<-sigChan
 		log.Println("Shutting down...")
 		d.shutdown()
+		cleanup() // Remove secure directory if created
 		os.Exit(0)
 	}()
 
@@ -237,6 +276,7 @@ type daemon struct {
 	conn          *websocket.Conn
 	connMu        sync.Mutex
 	shutdown      func()
+	socketPath    string
 }
 
 func (d *daemon) run() {
@@ -377,7 +417,7 @@ func (d *daemon) syncCron(jobs []protocol.JobDefinition) {
 }
 
 func (d *daemon) syncSystemCron(jobs []protocol.JobDefinition) {
-	content := generateCronContent(jobs, true)
+	content := generateCronContent(jobs, true, d.socketPath)
 
 	// Write atomically to /etc/cron.d/croncommander
 	tmpFile := cronFilePath + ".tmp"
@@ -395,7 +435,7 @@ func (d *daemon) syncSystemCron(jobs []protocol.JobDefinition) {
 }
 
 func (d *daemon) syncUserCron(jobs []protocol.JobDefinition) {
-	content := generateCronContent(jobs, false)
+	content := generateCronContent(jobs, false, d.socketPath)
 
 	// Use 'crontab -' to install
 	cmd := exec.Command("crontab", "-")
@@ -408,7 +448,7 @@ func (d *daemon) syncUserCron(jobs []protocol.JobDefinition) {
 	log.Printf("User crontab updated with %d jobs", len(jobs))
 }
 
-func generateCronContent(jobs []protocol.JobDefinition, systemMode bool) []byte {
+func generateCronContent(jobs []protocol.JobDefinition, systemMode bool, socketPath string) []byte {
 	var buf bytes.Buffer
 	buf.Grow(len(jobs) * 100)
 
@@ -495,10 +535,10 @@ func (d *daemon) sendMessage(msg interface{}) error {
 }
 
 func (d *daemon) startSocketListener() {
-	os.Remove(socketPath)
+	os.Remove(d.socketPath)
 
 	oldUmask := syscall.Umask(0117)
-	listener, err := net.Listen("unix", socketPath)
+	listener, err := net.Listen("unix", d.socketPath)
 	syscall.Umask(oldUmask)
 
 	if err != nil {
@@ -509,9 +549,9 @@ func (d *daemon) startSocketListener() {
 
 	// In user mode, 0660 is fine for user/group access.
 	// In system mode, it's in /var/lib/croncommander.
-	os.Chmod(socketPath, 0660)
+	os.Chmod(d.socketPath, 0660)
 
-	log.Printf("Listening on %s", socketPath)
+	log.Printf("Listening on %s", d.socketPath)
 
 	d.shutdown = func() {
 		listener.Close()
