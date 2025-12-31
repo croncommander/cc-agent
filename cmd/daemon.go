@@ -39,6 +39,9 @@ var (
 	daemonConfigFile string
 	// socketPath is determined at runtime to support both prod (secure) and dev (tmp) environments.
 	socketPath = getSocketPath()
+	// socketReadTimeout prevents Slowloris-style DoS attacks on the unix socket.
+	// It is a variable to allow overriding in tests.
+	socketReadTimeout = 5 * time.Second
 )
 
 var daemonCmd = &cobra.Command{
@@ -533,7 +536,19 @@ func (d *daemon) startSocketListener() {
 func (d *daemon) handleSocketConnection(conn net.Conn) {
 	defer conn.Close()
 
-	const maxReportSize = 1024 * 1024
+	// Read execution report from exec mode
+
+	// SECURITY: Set a read deadline to prevent indefinite blocking (Slowloris DoS).
+	// If a client connects but sends data too slowly (or not at all), we must timeout
+	// to free up resources (goroutines, file descriptors).
+	if err := conn.SetReadDeadline(time.Now().Add(socketReadTimeout)); err != nil {
+		log.Printf("Failed to set read deadline: %v", err)
+		return
+	}
+
+	// SECURITY: Limit the size of the request to prevent DoS (OOM) from a local attacker.
+	// 1MB is sufficient for legitimate reports (256KB stdout + 256KB stderr + metadata).
+	const maxReportSize = 1024 * 1024 // 1MB
 	limitReader := io.LimitReader(conn, maxReportSize)
 
 	decoder := json.NewDecoder(limitReader)
