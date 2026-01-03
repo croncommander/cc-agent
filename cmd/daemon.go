@@ -466,15 +466,21 @@ func writeShellQuote(buf *bytes.Buffer, s string) {
 		return
 	}
 	buf.WriteByte('\'')
-	last := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\'' {
-			buf.WriteString(s[last:i])
-			buf.WriteString("'\\''")
-			last = i + 1
+
+	start := 0
+	for {
+		// Use strings.IndexByte which is often optimized with SIMD
+		i := strings.IndexByte(s[start:], '\'')
+		if i == -1 {
+			buf.WriteString(s[start:])
+			break
 		}
+		i += start // Adjust index relative to original string
+		buf.WriteString(s[start:i])
+		buf.WriteString("'\\''")
+		start = i + 1
 	}
-	buf.WriteString(s[last:])
+
 	buf.WriteByte('\'')
 }
 
