@@ -417,6 +417,12 @@ func generateCronContent(jobs []protocol.JobDefinition, systemMode bool) []byte 
 	buf.WriteString("SHELL=/bin/bash\n")
 	buf.WriteString("PATH=/usr/local/bin:/usr/bin:/bin\n\n")
 
+	// Optimization: Determine executable path once outside the loop
+	execPath, err := os.Executable()
+	if err != nil {
+		execPath = "/usr/local/bin/cc-agent"
+	}
+
 	for _, job := range jobs {
 		if containsNewline(job.CronExpression) || containsNewline(job.JobID) || containsNewline(job.Command) {
 			log.Printf("Skipping job %q: contains invalid characters", job.JobID)
@@ -432,12 +438,6 @@ func generateCronContent(jobs []protocol.JobDefinition, systemMode bool) []byte 
 		if systemMode {
 			// In system mode, run jobs as root (for this MVP) since we don't have per-job user config.
 			buf.WriteString("root ")
-		}
-
-		// Self-executable path
-		execPath, err := os.Executable()
-		if err != nil {
-			execPath = "/usr/local/bin/cc-agent"
 		}
 
 		buf.WriteString(execPath)
@@ -466,15 +466,18 @@ func writeShellQuote(buf *bytes.Buffer, s string) {
 		return
 	}
 	buf.WriteByte('\'')
-	last := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\'' {
-			buf.WriteString(s[last:i])
-			buf.WriteString("'\\''")
-			last = i + 1
+
+	// Optimization: Use strings.IndexByte for faster scanning
+	for {
+		i := strings.IndexByte(s, '\'')
+		if i == -1 {
+			buf.WriteString(s)
+			break
 		}
+		buf.WriteString(s[:i])
+		buf.WriteString("'\\''")
+		s = s[i+1:]
 	}
-	buf.WriteString(s[last:])
 	buf.WriteByte('\'')
 }
 
