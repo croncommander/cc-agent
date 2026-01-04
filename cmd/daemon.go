@@ -42,6 +42,9 @@ var (
 	// socketReadTimeout prevents Slowloris-style DoS attacks on the unix socket.
 	// It is a variable to allow overriding in tests.
 	socketReadTimeout = 5 * time.Second
+	// websocketWriteTimeout ensures we don't block indefinitely on network writes,
+	// which would hold the connMu lock and deadlock the daemon.
+	websocketWriteTimeout = 10 * time.Second
 )
 
 var daemonCmd = &cobra.Command{
@@ -489,6 +492,12 @@ func (d *daemon) sendMessage(msg interface{}) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return err
+	}
+
+	// SECURITY: Set a write deadline to prevent indefinite blocking if the server
+	// or network hangs. This prevents the daemon from deadlocking (holding connMu).
+	if err := d.conn.SetWriteDeadline(time.Now().Add(websocketWriteTimeout)); err != nil {
+		return fmt.Errorf("failed to set write deadline: %w", err)
 	}
 
 	return d.conn.WriteMessage(websocket.TextMessage, data)
