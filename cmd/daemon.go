@@ -522,14 +522,30 @@ func (d *daemon) startSocketListener() {
 		d.connMu.Unlock()
 	}
 
+	// SECURITY: Limit concurrent connections to prevent DoS (resource exhaustion)
+	// from local attackers opening many connections.
+	// 50 concurrent reports should be plenty for any reasonable server.
+	const maxConcurrentConns = 50
+	sem := make(chan struct{}, maxConcurrentConns)
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			// Check for closed network connection to avoid log spam on shutdown
+			if strings.Contains(err.Error(), "use of closed network connection") {
+				return
+			}
 			log.Printf("Socket accept error: %v", err)
 			continue
 		}
 
-		go d.handleSocketConnection(conn)
+		// Acquire semaphore slot - blocks if limit reached
+		sem <- struct{}{}
+
+		go func(c net.Conn) {
+			defer func() { <-sem }() // Release slot
+			d.handleSocketConnection(c)
+		}(conn)
 	}
 }
 
