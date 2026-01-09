@@ -42,6 +42,9 @@ var (
 	// socketReadTimeout prevents Slowloris-style DoS attacks on the unix socket.
 	// It is a variable to allow overriding in tests.
 	socketReadTimeout = 5 * time.Second
+	// maxConcurrentConnections limits the number of active socket handlers
+	// to prevent resource exhaustion from a local attacker.
+	maxConcurrentConnections = 50
 )
 
 var daemonCmd = &cobra.Command{
@@ -522,14 +525,31 @@ func (d *daemon) startSocketListener() {
 		d.connMu.Unlock()
 	}
 
+	// SECURITY: Use a semaphore to limit concurrent connections.
+	sem := make(chan struct{}, maxConcurrentConnections)
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			// Check if the listener was closed (graceful shutdown)
+			// Go 1.16+ has errors.Is(err, net.ErrClosed), but string check is portable for older Go if needed.
+			// Since we use Go 1.23, we should use errors.Is or string check.
+			// "use of closed network connection" is standard.
+			if strings.Contains(err.Error(), "use of closed network connection") {
+				return
+			}
 			log.Printf("Socket accept error: %v", err)
 			continue
 		}
 
-		go d.handleSocketConnection(conn)
+		// Acquire semaphore
+		sem <- struct{}{}
+
+		go func() {
+			// Release semaphore when handler finishes
+			defer func() { <-sem }()
+			d.handleSocketConnection(conn)
+		}()
 	}
 }
 
