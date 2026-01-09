@@ -417,6 +417,12 @@ func generateCronContent(jobs []protocol.JobDefinition, systemMode bool) []byte 
 	buf.WriteString("SHELL=/bin/bash\n")
 	buf.WriteString("PATH=/usr/local/bin:/usr/bin:/bin\n\n")
 
+	// Pre-calculate executable path once
+	execPath, err := os.Executable()
+	if err != nil {
+		execPath = "/usr/local/bin/cc-agent"
+	}
+
 	for _, job := range jobs {
 		if containsNewline(job.CronExpression) || containsNewline(job.JobID) || containsNewline(job.Command) {
 			log.Printf("Skipping job %q: contains invalid characters", job.JobID)
@@ -435,11 +441,6 @@ func generateCronContent(jobs []protocol.JobDefinition, systemMode bool) []byte 
 		}
 
 		// Self-executable path
-		execPath, err := os.Executable()
-		if err != nil {
-			execPath = "/usr/local/bin/cc-agent"
-		}
-
 		buf.WriteString(execPath)
 		buf.WriteString(" exec --job-id ")
 		writeShellQuote(&buf, job.JobID)
