@@ -132,6 +132,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		osType:        getOsInfo(),
 		executionMode: executionMode,
 		isRoot:        isRoot,
+		connLimit:     make(chan struct{}, 50), // SECURITY: Max 50 concurrent socket handlers
 	}
 
 	// Start Unix socket listener for exec mode reports
@@ -236,6 +237,7 @@ type daemon struct {
 	agentID       string
 	conn          *websocket.Conn
 	connMu        sync.Mutex
+	connLimit     chan struct{} // Semaphore to limit concurrent socket connections
 	shutdown      func()
 }
 
@@ -525,11 +527,22 @@ func (d *daemon) startSocketListener() {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			// Check if we should stop
+			if strings.Contains(err.Error(), "use of closed network connection") {
+				return
+			}
 			log.Printf("Socket accept error: %v", err)
 			continue
 		}
 
-		go d.handleSocketConnection(conn)
+		// Acquire semaphore slot
+		// This blocks if we are at capacity, creating backpressure.
+		d.connLimit <- struct{}{}
+
+		go func() {
+			defer func() { <-d.connLimit }()
+			d.handleSocketConnection(conn)
+		}()
 	}
 }
 
