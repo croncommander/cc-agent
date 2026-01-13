@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -31,6 +32,9 @@ const (
 	heartbeatInterval = 60 * time.Second
 	reconnectDelay    = 5 * time.Second
 	maxReconnectDelay = 60 * time.Second
+	// maxConcurrentSocketConnections limits the number of active socket handlers
+	// to prevent resource exhaustion (DoS) from local attackers.
+	maxConcurrentSocketConnections = 50
 )
 
 var (
@@ -522,15 +526,35 @@ func (d *daemon) startSocketListener() {
 		d.connMu.Unlock()
 	}
 
+	// SECURITY: Use a semaphore to limit concurrent connections.
+	// This prevents a local attacker from exhausting system resources (goroutines, memory)
+	// by opening thousands of connections.
+	sem := make(chan struct{}, maxConcurrentSocketConnections)
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			// Check if the listener was closed (shutdown)
+			if d.isShutdownErr(err) {
+				return
+			}
 			log.Printf("Socket accept error: %v", err)
 			continue
 		}
 
-		go d.handleSocketConnection(conn)
+		// Acquire semaphore before spawning goroutine
+		sem <- struct{}{}
+
+		go func(c net.Conn) {
+			defer func() { <-sem }() // Release semaphore
+			d.handleSocketConnection(c)
+		}(conn)
 	}
+}
+
+// isShutdownErr checks if the error is due to the listener being closed
+func (d *daemon) isShutdownErr(err error) bool {
+	return errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection")
 }
 
 func (d *daemon) handleSocketConnection(conn net.Conn) {
