@@ -417,6 +417,13 @@ func generateCronContent(jobs []protocol.JobDefinition, systemMode bool) []byte 
 	buf.WriteString("SHELL=/bin/bash\n")
 	buf.WriteString("PATH=/usr/local/bin:/usr/bin:/bin\n\n")
 
+	// Optimization: Resolve executable path once outside the loop to avoid
+	// repeated system calls (readlink /proc/self/exe), which are not cached.
+	execPath, err := os.Executable()
+	if err != nil {
+		execPath = "/usr/local/bin/cc-agent"
+	}
+
 	for _, job := range jobs {
 		if containsNewline(job.CronExpression) || containsNewline(job.JobID) || containsNewline(job.Command) {
 			log.Printf("Skipping job %q: contains invalid characters", job.JobID)
@@ -432,12 +439,6 @@ func generateCronContent(jobs []protocol.JobDefinition, systemMode bool) []byte 
 		if systemMode {
 			// In system mode, run jobs as root (for this MVP) since we don't have per-job user config.
 			buf.WriteString("root ")
-		}
-
-		// Self-executable path
-		execPath, err := os.Executable()
-		if err != nil {
-			execPath = "/usr/local/bin/cc-agent"
 		}
 
 		buf.WriteString(execPath)

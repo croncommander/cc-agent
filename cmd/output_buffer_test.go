@@ -24,8 +24,8 @@ func TestLimitedBuffer_NoWrap(t *testing.T) {
 	// Write more
 	input2 := " More text."
 	lb.Write([]byte(input2))
-	if got := lb.String(); got != input + input2 {
-		t.Errorf("String() = %q, want %q", got, input + input2)
+	if got := lb.String(); got != input+input2 {
+		t.Errorf("String() = %q, want %q", got, input+input2)
 	}
 }
 
