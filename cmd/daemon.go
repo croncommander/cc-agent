@@ -42,6 +42,9 @@ var (
 	// socketReadTimeout prevents Slowloris-style DoS attacks on the unix socket.
 	// It is a variable to allow overriding in tests.
 	socketReadTimeout = 5 * time.Second
+	// socketConcurrencyLimit limits the number of concurrent socket connections to prevent OOM/DoS.
+	// It is a variable to allow overriding in tests.
+	socketConcurrencyLimit = 50
 )
 
 var daemonCmd = &cobra.Command{
@@ -522,14 +525,27 @@ func (d *daemon) startSocketListener() {
 		d.connMu.Unlock()
 	}
 
+	// Create a semaphore to limit concurrent connections
+	sem := make(chan struct{}, socketConcurrencyLimit)
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			// Check for closed listener to avoid spamming logs on shutdown
+			if strings.Contains(err.Error(), "use of closed network connection") {
+				return
+			}
 			log.Printf("Socket accept error: %v", err)
 			continue
 		}
 
-		go d.handleSocketConnection(conn)
+		// Acquire semaphore (blocks if limit reached)
+		sem <- struct{}{}
+
+		go func(c net.Conn) {
+			defer func() { <-sem }() // Release semaphore
+			d.handleSocketConnection(c)
+		}(conn)
 	}
 }
 
