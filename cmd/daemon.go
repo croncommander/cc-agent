@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -134,6 +135,9 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		isRoot:        isRoot,
 	}
 
+	// Initialize shutdown to no-op to prevent race condition before listener starts
+	d.shutdown = func() {}
+
 	// Start Unix socket listener for exec mode reports
 	go d.startSocketListener()
 
@@ -144,7 +148,9 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	go func() {
 		<-sigChan
 		log.Println("Shutting down...")
-		d.shutdown()
+		if d.shutdown != nil {
+			d.shutdown()
+		}
 		os.Exit(0)
 	}()
 
@@ -513,7 +519,11 @@ func (d *daemon) startSocketListener() {
 
 	log.Printf("Listening on %s", socketPath)
 
+	// Create a channel to signal the accept loop to stop
+	done := make(chan struct{})
+
 	d.shutdown = func() {
+		close(done) // Signal loop to exit if blocked on semaphore
 		listener.Close()
 		d.connMu.Lock()
 		if d.conn != nil {
@@ -522,14 +532,39 @@ func (d *daemon) startSocketListener() {
 		d.connMu.Unlock()
 	}
 
+	// Limit concurrent connections to prevent DoS (resource exhaustion)
+	// 50 concurrent reports + OS backlog is sufficient for high load without OOM.
+	const maxConcurrentConnections = 50
+	sem := make(chan struct{}, maxConcurrentConnections)
+
 	for {
+		// Acquire semaphore before accepting to strictly limit active goroutines.
+		// We use a select to allow graceful shutdown if blocked.
+		select {
+		case sem <- struct{}{}:
+			// Acquired token
+		case <-done:
+			return
+		}
+
 		conn, err := listener.Accept()
 		if err != nil {
+			// Release token since we didn't spawn a handler
+			<-sem
+
+			// Check if we are shutting down
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+
 			log.Printf("Socket accept error: %v", err)
 			continue
 		}
 
-		go d.handleSocketConnection(conn)
+		go func(c net.Conn) {
+			defer func() { <-sem }() // Release token when done
+			d.handleSocketConnection(c)
+		}(conn)
 	}
 }
 
