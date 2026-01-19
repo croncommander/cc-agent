@@ -31,3 +31,8 @@ Action: Wrap `net.Listen` with `syscall.Umask(0117)` to strictly enforce `0660` 
 Risk: The daemon's internal socket listener (`handleSocketConnection`) read unlimited data from incoming connections before unmarshalling JSON. A local authenticated attacker (e.g., a compromised `ccrunner` user) could cause a Denial of Service (DoS) by sending a massive payload (e.g., gigabytes of data), forcing the daemon to allocate excessive memory and potentially triggering an Out-Of-Memory (OOM) crash.
 Learning: Never trust the size of incoming data, even from "trusted" local users. `json.Decoder` reads from the stream until it finds a valid object or error, but it buffers data. Without an `io.LimitReader`, a decoder can be coerced into reading indefinitely.
 Action: Implemented a strict 1MB read limit (`io.LimitReader`) on the socket connection before passing it to the JSON decoder. This is sufficient for legitimate execution reports (stdout/stderr are capped at 256KB each) but prevents memory exhaustion attacks.
+
+## 2026-01-19 - Secure Socket Fallback via UID Namespacing
+**Risk:** Falling back to `/tmp/cc-agent-<user>.sock` allowed pre-creation attacks where an attacker creates the socket or directory with loose permissions, leading to DoS or Information Disclosure (hijacking execution reports).
+**Learning:** Shared directories like `/tmp` rely on filenames for separation, which is insufficient against pre-creation attacks. `MkdirAll` does not verify ownership of existing directories.
+**Action:** Implemented a UID-namespaced directory (`/tmp/cc-agent-<uid>/`) with strict `0700` permission and ownership checks (`ensureSocketDir`). This ensures a private, authenticated workspace even in shared temporary filesystems.
