@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"os/exec"
 	"os/user"
 	"strings"
@@ -162,6 +163,11 @@ func sendToDaemon(report protocol.ExecutionReportPayload) error {
 	if execSocketPath != "" {
 		path = execSocketPath
 	}
+
+	if err := verifySocketDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("insecure socket directory: %w", err)
+	}
+
 	conn, err := net.Dial("unix", path)
 	if err != nil {
 		return fmt.Errorf("failed to connect to daemon socket: %w", err)
