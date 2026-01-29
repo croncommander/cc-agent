@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -42,6 +43,11 @@ var (
 	// socketReadTimeout prevents Slowloris-style DoS attacks on the unix socket.
 	// It is a variable to allow overriding in tests.
 	socketReadTimeout = 5 * time.Second
+
+	// maxConcurrentConnections limits the number of active socket connections
+	// to prevent resource exhaustion DoS.
+	// It is a variable to allow overriding in tests.
+	maxConcurrentConnections = 50
 )
 
 var daemonCmd = &cobra.Command{
@@ -522,14 +528,27 @@ func (d *daemon) startSocketListener() {
 		d.connMu.Unlock()
 	}
 
+	// Semaphore to limit concurrent connections and prevent unbounded goroutine growth (DoS).
+	sem := make(chan struct{}, maxConcurrentConnections)
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
 			log.Printf("Socket accept error: %v", err)
 			continue
 		}
 
-		go d.handleSocketConnection(conn)
+		// Acquire semaphore (backpressure)
+		// This blocks the accept loop when the limit is reached.
+		sem <- struct{}{}
+
+		go func(c net.Conn) {
+			defer func() { <-sem }()
+			d.handleSocketConnection(c)
+		}(conn)
 	}
 }
 
