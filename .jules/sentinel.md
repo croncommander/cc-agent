@@ -31,3 +31,8 @@ Action: Wrap `net.Listen` with `syscall.Umask(0117)` to strictly enforce `0660` 
 Risk: The daemon's internal socket listener (`handleSocketConnection`) read unlimited data from incoming connections before unmarshalling JSON. A local authenticated attacker (e.g., a compromised `ccrunner` user) could cause a Denial of Service (DoS) by sending a massive payload (e.g., gigabytes of data), forcing the daemon to allocate excessive memory and potentially triggering an Out-Of-Memory (OOM) crash.
 Learning: Never trust the size of incoming data, even from "trusted" local users. `json.Decoder` reads from the stream until it finds a valid object or error, but it buffers data. Without an `io.LimitReader`, a decoder can be coerced into reading indefinitely.
 Action: Implemented a strict 1MB read limit (`io.LimitReader`) on the socket connection before passing it to the JSON decoder. This is sufficient for legitimate execution reports (stdout/stderr are capped at 256KB each) but prevents memory exhaustion attacks.
+
+## 2026-02-01 - Unbounded Concurrency in Socket Listener
+Risk: The daemon spawned a new goroutine for every incoming connection without limit. A local attacker could flood the socket with connections, causing massive memory allocation and goroutine scheduling overhead (DoS), potentially crashing the agent.
+Learning: `net.Listener.Accept` loops must always have backpressure mechanisms. Relying on the OS backlog is insufficient if the application immediately accepts and spawns resources. Go's cheap goroutines make it easy to forget that they are not free.
+Action: Implemented a semaphore pattern (buffered channel) to strictly limit concurrent active connections. This enforces backpressure on the OS socket backlog when the limit is reached.
