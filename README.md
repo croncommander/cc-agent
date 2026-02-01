@@ -8,7 +8,7 @@
 > Part of the **CronCommander** project — a centralized control plane for cron jobs.
 
 CronCommander Agent is a lightweight Go daemon that connects cron-based systems
-to the CronCommander control plane.
+to the CronCommander server.
 
 It provides the foundation for centralized visibility and management of cron jobs
 across servers, containers, and environments.
