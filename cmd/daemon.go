@@ -74,7 +74,12 @@ func getSocketPath() string {
 	if runtimeDir != "" {
 		return filepath.Join(runtimeDir, "cc-agent.sock")
 	}
-	return filepath.Join(os.TempDir(), "cc-agent-"+os.Getenv("USER")+".sock")
+	// Use a private subdirectory for security (prevent race conditions/pre-creation attacks)
+	uid := os.Geteuid()
+	if uid == -1 {
+		return filepath.Join(os.TempDir(), "cc-agent-"+os.Getenv("USER"), "cc-agent.sock")
+	}
+	return filepath.Join(os.TempDir(), fmt.Sprintf("cc-agent-%d", uid), "cc-agent.sock")
 }
 
 // getSocketPathWithBase returns the socket path within the given base directory.
@@ -495,6 +500,11 @@ func (d *daemon) sendMessage(msg interface{}) error {
 }
 
 func (d *daemon) startSocketListener() {
+	if err := ensureSocketDir(socketPath); err != nil {
+		log.Printf("Failed to secure socket directory: %v", err)
+		return
+	}
+
 	os.Remove(socketPath)
 
 	oldUmask := syscall.Umask(0117)
