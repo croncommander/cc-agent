@@ -74,7 +74,9 @@ func getSocketPath() string {
 	if runtimeDir != "" {
 		return filepath.Join(runtimeDir, "cc-agent.sock")
 	}
-	return filepath.Join(os.TempDir(), "cc-agent-"+os.Getenv("USER")+".sock")
+	// SECURE FIX: Use a private directory with 0700 permissions based on EUID
+	// instead of a shared file in /tmp which can be pre-created by attackers.
+	return filepath.Join(os.TempDir(), fmt.Sprintf("cc-agent-%d", os.Geteuid()), "cc-agent.sock")
 }
 
 // getSocketPathWithBase returns the socket path within the given base directory.
@@ -495,6 +497,12 @@ func (d *daemon) sendMessage(msg interface{}) error {
 }
 
 func (d *daemon) startSocketListener() {
+	// Ensure parent directory exists with secure permissions
+	if err := ensureSocketDir(socketPath); err != nil {
+		log.Printf("Failed to secure socket directory: %v", err)
+		return
+	}
+
 	os.Remove(socketPath)
 
 	oldUmask := syscall.Umask(0117)
@@ -531,6 +539,41 @@ func (d *daemon) startSocketListener() {
 
 		go d.handleSocketConnection(conn)
 	}
+}
+
+func ensureSocketDir(path string) error {
+	dir := filepath.Dir(path)
+
+	// Attempt to create the directory first.
+	// If it already exists, MkdirAll returns nil (success).
+	// We ignore errors here and rely on the subsequent checks to validate the state.
+	_ = os.MkdirAll(dir, 0700)
+
+	// Check the directory state (use Lstat to detect symlinks)
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("failed to stat socket directory %q: %w", dir, err)
+	}
+
+	// SECURITY: Ensure it's a directory, not a symlink
+	if !info.IsDir() {
+		return fmt.Errorf("socket path parent %q is not a directory (mode=%v)", dir, info.Mode())
+	}
+
+	// SECURITY: Verify ownership to prevent "confused deputy" attacks
+	if err := verifySocketDirOwnership(info); err != nil {
+		return err
+	}
+
+	// Verify permissions
+	if info.Mode().Perm() != 0700 {
+		// Attempt to fix (safe now because we verified ownership and it's not a symlink)
+		if err := os.Chmod(dir, 0700); err != nil {
+			return fmt.Errorf("insecure socket directory permissions %v and failed to fix: %w", info.Mode(), err)
+		}
+	}
+
+	return nil
 }
 
 func (d *daemon) handleSocketConnection(conn net.Conn) {
