@@ -168,6 +168,15 @@ func sendToDaemon(report protocol.ExecutionReportPayload) error {
 	}
 	defer conn.Close()
 
+	// SECURITY: Verify that we connected to the correct socket peer.
+	// This prevents Information Disclosure if an attacker pre-creates the socket
+	// in a shared directory (like /tmp).
+	if unixConn, ok := conn.(*net.UnixConn); ok {
+		if err := verifySocketPeer(unixConn); err != nil {
+			return fmt.Errorf("socket security verification failed: %w", err)
+		}
+	}
+
 	// Set write deadline
 	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 
