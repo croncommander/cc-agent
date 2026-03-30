@@ -7,6 +7,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// version is set by main.go from ldflags injection
+var version = "dev"
+
+// SetVersion sets the agent version from main (injected at build time).
+func SetVersion(v string) {
+	version = v
+	rootCmd.Version = v
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "cc-agent",
 	Short: "CronCommander Agent",
