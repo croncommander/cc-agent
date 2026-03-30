@@ -5,48 +5,46 @@
 
 # cc-agent
 
-> Part of the **CronCommander** project — a centralized control plane for cron jobs.
+> Part of the **CronCommander** project — a control plane for cron jobs across your infrastructure.
 
-CronCommander Agent is a lightweight Go daemon that connects cron-based systems
-to the CronCommander control plane.
-
-It provides the foundation for centralized visibility and management of cron jobs
-across servers, containers, and environments.
+CronCommander Agent is a lightweight Go binary that connects your servers to the CronCommander control plane. It gives you visibility and control over cron jobs without replacing cron itself.
 
 ## Features
 
-- **Daemon Mode**: Runs as a long-lived agent connecting via WebSocket to the CronCommander server
+- **Daemon Mode**: Long-lived agent connecting via WebSocket to `gateway.croncommander.com`
 - **Cron Synchronization**: Receives job definitions from the server and writes them to `/etc/cron.d/croncommander`
-- **Execution Wrapper**: Wraps job execution to capture stdout/stderr, exit codes, and timing
-- **Privileged Separation**: Jobs run as an unprivileged `ccrunner` user, never as root
-- **Security Hardened**: Includes no-new-privileges, minimal environment, and controlled working directory
+- **Execution Wrapper**: Wraps each job to capture stdout/stderr, exit codes, and timing
+- **Dual Modes**: User Mode (unprivileged, manages its own crontab) or System Mode (root, manages `/etc/cron.d`)
+- **Security Hardened**: No-new-privileges, minimal environment, controlled working directory
+- **Version Injection**: Version is embedded at compile time via `-ldflags`
 
 ## Installation
 
-### Quick Install (Linux with systemd)
+### Quick Install (Linux / FreeBSD / macOS)
 
 ```bash
 curl -sSL https://croncommander.com/install.sh | bash
 ```
 
-Or set your API key and server URL via environment variables:
+Set your API key and gateway URL via environment variables:
 
 ```bash
-CC_API_KEY="your-api-key" CC_SERVER_URL="ws://your-server:8081/agent" \
+CC_API_KEY="your-api-key" \
   curl -sSL https://croncommander.com/install.sh | bash
 ```
 
+The installer auto-detects your OS and architecture and downloads the correct binary.
+
 ### Manual Installation
 
-1. **Build from source**:
+1. **Download the binary** from [releases/](releases/) or build from source:
    ```bash
-   cd cc-agent
-   go build -o cc-agent .
+   make build
    ```
 
 2. **Install the binary**:
    ```bash
-   sudo cp cc-agent /usr/local/bin/
+   sudo cp bin/cc-agent-*-linux-amd64 /usr/local/bin/cc-agent
    sudo chmod 755 /usr/local/bin/cc-agent
    ```
 
@@ -55,7 +53,7 @@ CC_API_KEY="your-api-key" CC_SERVER_URL="ws://your-server:8081/agent" \
    sudo mkdir -p /etc/croncommander
    sudo tee /etc/croncommander/config.yaml > /dev/null <<EOF
    api_key: your-api-key
-   server_url: ws://your-server:8081/agent
+   server_url: wss://gateway.croncommander.com/
    EOF
    ```
 
@@ -68,7 +66,7 @@ CC_API_KEY="your-api-key" CC_SERVER_URL="ws://your-server:8081/agent" \
 
 ### Daemon Mode
 
-The agent runs as a daemon, maintaining a WebSocket connection to the CronCommander server:
+The agent runs as a daemon, maintaining a WebSocket connection to the CronCommander gateway:
 
 ```bash
 cc-agent daemon --config /etc/croncommander/config.yaml
@@ -76,7 +74,7 @@ cc-agent daemon --config /etc/croncommander/config.yaml
 
 ### Exec Mode
 
-The `exec` subcommand wraps job execution for reporting. It is called automatically by cron—not by users directly:
+The `exec` subcommand wraps job execution for reporting. It is called automatically by cron — not by users directly:
 
 ```bash
 cc-agent exec --job-id abc123 -- /path/to/script.sh arg1 arg2
@@ -88,34 +86,75 @@ This captures:
 - stdout/stderr output (capped at 256KB each)
 - Executing user and UID
 
+### Version
+
+```bash
+cc-agent --version
+```
+
 ## Security
 
-CronCommander Agent is designed with security in mind:
+CronCommander Agent is designed with security as a first-class concern:
 
 | Feature | Description |
 |---------|-------------|
-| **Unprivileged execution** | Jobs run as `ccrunner`, a dedicated system user with no login shell |
-| **Root rejection** | `cc-agent exec` refuses to run if UID is 0 |
+| **User Mode (default)** | Agent runs as `cc-agent-user`, manages its own crontab only |
+| **System Mode** | Opt-in root mode for `/etc/cron.d` management |
 | **No-new-privileges** | Uses `PR_SET_NO_NEW_PRIVS` to prevent setuid escalation (Linux 3.5+) |
 | **Minimal environment** | Only PATH, HOME, LANG, and LC_ALL are set |
 | **Controlled working directory** | Jobs execute in `/var/lib/croncommander` |
 | **Systemd hardening** | ProtectSystem=strict, ProtectHome=yes, NoNewPrivileges=yes |
 
-For more details, see [Security Documentation](https://croncommander.com/docs/security).
+For more details, see [Security Documentation](https://croncommander.com/docs.html#security).
 
 ## Configuration
 
 The agent is configured via YAML file:
 
 ```yaml
+# Agent version
+version: 1.1.0
+
 # Workspace API key for authentication
 api_key: your-workspace-api-key
 
-# WebSocket server URL
-server_url: ws://localhost:8081/agent
+# WebSocket gateway URL
+server_url: wss://gateway.croncommander.com/
+
+# Execution mode: "user" (default) or "system"
+execution_mode: user
 ```
 
 Default config location: `/etc/croncommander/config.yaml`
+
+## Building
+
+### Requirements
+
+- Go 1.23+
+- The root `VERSION` file (read automatically by the Makefile)
+
+### Build
+
+```bash
+make build
+```
+
+Produces versioned binaries in `bin/`, e.g. `cc-agent-1-1-0-linux-amd64`.
+
+### Publish Release
+
+```bash
+make publish
+```
+
+Copies binaries to `releases/` and `../build/` for local development.
+
+### Testing
+
+```bash
+go test ./...
+```
 
 ## Architecture
 
@@ -137,27 +176,10 @@ Default config location: `/etc/croncommander/config.yaml`
           ▼
 ┌─────────────────────┐
 │  CronCommander      │
-│  Server             │
+│  Gateway             │
+│  (gateway.           │
+│   croncommander.com) │
 └─────────────────────┘
-```
-
-## Development
-
-### Requirements
-
-- Go 1.23+
-- Linux (for full security features) or macOS/Windows (limited features)
-
-### Building
-
-```bash
-go build -o cc-agent .
-```
-
-### Testing
-
-```bash
-go test ./...
 ```
 
 ## License
@@ -166,8 +188,9 @@ Apache-2.0 — see [LICENSE](LICENSE)
 
 ## Project
 
-Part of the **CronCommander** project — a centralized control plane for cron jobs.
+Part of the **CronCommander** project — a control plane for cron jobs across your infrastructure.
 
 - Website: https://croncommander.com
-- Documentation: https://croncommander.com/docs
-- Security: https://croncommander.com/docs/security
+- Documentation: https://croncommander.com/docs.html
+- Pricing: https://croncommander.com/pricing.html
+- GitHub: https://github.com/croncommander
