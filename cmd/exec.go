@@ -158,7 +158,7 @@ func runExec(cmd *cobra.Command, args []string) {
 }
 
 func sendToDaemon(report protocol.ExecutionReportPayload) error {
-	path := socketPath
+	path := defaultSocketPath
 	if execSocketPath != "" {
 		path = execSocketPath
 	}
