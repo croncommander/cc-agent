@@ -522,14 +522,30 @@ func (d *daemon) startSocketListener() {
 		d.connMu.Unlock()
 	}
 
+	// SECURITY: Limit concurrent connections to prevent DoS (Goroutine exhaustion).
+	// If the limit is reached, this loop blocks, causing `Accept` to effectively pause.
+	// This relies on the OS socket backlog to handle backpressure and reject excess connections.
+	const maxConcurrentConns = 50
+	connLimit := make(chan struct{}, maxConcurrentConns)
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			// Handle shutdown gracefully
+			if strings.Contains(err.Error(), "use of closed network connection") {
+				return
+			}
 			log.Printf("Socket accept error: %v", err)
 			continue
 		}
 
-		go d.handleSocketConnection(conn)
+		// Acquire semaphore (blocks if limit reached)
+		connLimit <- struct{}{}
+
+		go func(c net.Conn) {
+			defer func() { <-connLimit }() // Release semaphore
+			d.handleSocketConnection(c)
+		}(conn)
 	}
 }
 
