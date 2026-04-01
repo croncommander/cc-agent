@@ -466,15 +466,19 @@ func writeShellQuote(buf *bytes.Buffer, s string) {
 		return
 	}
 	buf.WriteByte('\'')
-	last := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\'' {
-			buf.WriteString(s[last:i])
-			buf.WriteString("'\\''")
-			last = i + 1
+
+	for i := 0; i < len(s); {
+		nextQuote := strings.IndexByte(s[i:], '\'')
+		if nextQuote == -1 {
+			buf.WriteString(s[i:])
+			break
 		}
+		// nextQuote is relative to s[i:]
+		buf.WriteString(s[i : i+nextQuote])
+		buf.WriteString("'\\''")
+		i += nextQuote + 1
 	}
-	buf.WriteString(s[last:])
+
 	buf.WriteByte('\'')
 }
 
