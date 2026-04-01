@@ -42,6 +42,11 @@ var (
 	// socketReadTimeout prevents Slowloris-style DoS attacks on the unix socket.
 	// It is a variable to allow overriding in tests.
 	socketReadTimeout = 5 * time.Second
+
+	// websocketWriteTimeout prevents the daemon from hanging if the server stops reading.
+	websocketWriteTimeout = 10 * time.Second
+	// websocketReadTimeout detects if the server or network has silently died.
+	websocketReadTimeout = heartbeatInterval + 10*time.Second
 )
 
 var daemonCmd = &cobra.Command{
@@ -317,6 +322,9 @@ func (d *daemon) messageLoop() {
 			case <-heartbeatTicker.C:
 				if err := d.sendMessage(protocol.HeartbeatMessage{Type: "heartbeat"}); err != nil {
 					log.Printf("Failed to send heartbeat: %v", err)
+					// SECURITY: If heartbeat fails (e.g. write timeout), we must assume the connection
+					// is dead. Close it to force the read loop to exit and trigger reconnection.
+					d.conn.Close()
 					return
 				}
 			case <-stopHeartbeat:
@@ -327,6 +335,10 @@ func (d *daemon) messageLoop() {
 
 	// Message receive loop
 	for {
+		// SECURITY: Set a read deadline to detect silent connection loss (e.g. pulled cable).
+		// We expect traffic (at least heartbeat_ack) every heartbeatInterval.
+		d.conn.SetReadDeadline(time.Now().Add(websocketReadTimeout))
+
 		_, message, err := d.conn.ReadMessage()
 		if err != nil {
 			log.Printf("Read error: %v", err)
@@ -485,6 +497,10 @@ func (d *daemon) sendMessage(msg interface{}) error {
 	if d.conn == nil {
 		return fmt.Errorf("not connected")
 	}
+
+	// SECURITY: Set a write deadline to prevent the daemon from locking up
+	// if the server stops reading (e.g. half-open connection).
+	d.conn.SetWriteDeadline(time.Now().Add(websocketWriteTimeout))
 
 	data, err := json.Marshal(msg)
 	if err != nil {
