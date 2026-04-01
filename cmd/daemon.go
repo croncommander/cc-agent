@@ -69,11 +69,20 @@ func getSocketPath() string {
 	if os.Geteuid() == 0 {
 		return filepath.Join(secureSocketDir, "cc-agent.sock")
 	}
-	// Fallback for non-root: use XDG_RUNTIME_DIR or tmp
+	// Fallback for non-root: use XDG_RUNTIME_DIR, then ~/.cc-agent, then tmp
 	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
 	if runtimeDir != "" {
 		return filepath.Join(runtimeDir, "cc-agent.sock")
 	}
+
+	// Try using HOME/.cc-agent (Secure, Private)
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".cc-agent", "cc-agent.sock")
+	}
+
+	// Final Fallback: /tmp (Insecure if not careful)
+	// SECURITY: This path is predictable and in a shared directory.
+	// We should ideally ensure this directory is 0700 if we create it.
 	return filepath.Join(os.TempDir(), "cc-agent-"+os.Getenv("USER")+".sock")
 }
 
@@ -495,6 +504,15 @@ func (d *daemon) sendMessage(msg interface{}) error {
 }
 
 func (d *daemon) startSocketListener() {
+	// SECURITY: Ensure the parent directory exists and has secure permissions.
+	// This is critical when falling back to directories like ~/.cc-agent or /tmp.
+	// 0700 ensures only the user can access the directory, preventing DoS/hijacking.
+	dir := filepath.Dir(socketPath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		log.Printf("Failed to create socket directory %s: %v", dir, err)
+		return
+	}
+
 	os.Remove(socketPath)
 
 	oldUmask := syscall.Umask(0117)
