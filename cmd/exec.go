@@ -162,6 +162,13 @@ func sendToDaemon(report protocol.ExecutionReportPayload) error {
 	if execSocketPath != "" {
 		path = execSocketPath
 	}
+
+	// Validate directory security before connecting to prevent Information Disclosure
+	// if an attacker has pre-created the socket directory in /tmp.
+	if err := ensureSocketDir(path); err != nil {
+		return fmt.Errorf("socket security check failed: %w", err)
+	}
+
 	conn, err := net.Dial("unix", path)
 	if err != nil {
 		return fmt.Errorf("failed to connect to daemon socket: %w", err)
