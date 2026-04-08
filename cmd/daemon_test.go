@@ -93,3 +93,20 @@ func TestGenerateCronContent_CommandInjection(t *testing.T) {
 		t.Errorf("Vulnerability found: Job ID injection possible")
 	}
 }
+
+func BenchmarkGenerateCronContent(b *testing.B) {
+	// Setup jobs
+	jobs := make([]protocol.JobDefinition, 1000)
+	for i := 0; i < 1000; i++ {
+		jobs[i] = protocol.JobDefinition{
+			JobID:          "job",
+			CronExpression: "* * * * *",
+			Command:        "echo hello",
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		generateCronContent(jobs, false)
+	}
+}
