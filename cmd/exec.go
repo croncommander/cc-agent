@@ -162,6 +162,13 @@ func sendToDaemon(report protocol.ExecutionReportPayload) error {
 	if execSocketPath != "" {
 		path = execSocketPath
 	}
+
+	// Verify security of the socket path before connecting to prevent
+	// sending sensitive data to an insecure socket (Information Disclosure).
+	if err := ensureSocketDir(path); err != nil {
+		return fmt.Errorf("security check failed for socket path: %w", err)
+	}
+
 	conn, err := net.Dial("unix", path)
 	if err != nil {
 		return fmt.Errorf("failed to connect to daemon socket: %w", err)
