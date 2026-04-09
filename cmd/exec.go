@@ -18,6 +18,8 @@ import (
 var (
 	execJobID      string
 	execSocketPath string
+	// getCurrentUid is a variable to allow mocking in tests
+	getCurrentUid = os.Getuid
 )
 
 var execCmd = &cobra.Command{
@@ -167,6 +169,14 @@ func sendToDaemon(report protocol.ExecutionReportPayload) error {
 		return fmt.Errorf("failed to connect to daemon socket: %w", err)
 	}
 	defer conn.Close()
+
+	// SECURITY: Verify that we are connected to the expected peer (same user or root).
+	// This prevents Information Disclosure if an attacker spoofs the socket in a shared directory.
+	if unixConn, ok := conn.(*net.UnixConn); ok {
+		if err := verifySocketPeer(unixConn); err != nil {
+			return fmt.Errorf("security check failed: %w", err)
+		}
+	}
 
 	// Set write deadline
 	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))

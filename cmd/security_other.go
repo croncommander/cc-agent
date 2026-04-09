@@ -2,6 +2,13 @@
 
 package cmd
 
+import "net"
+
+// verifySocketPeer is a no-op on non-Linux platforms as SO_PEERCRED is Linux-specific.
+func verifySocketPeer(conn *net.UnixConn) error {
+	return nil
+}
+
 // setNoNewPrivs is a no-op on non-Linux platforms.
 // PR_SET_NO_NEW_PRIVS is a Linux-specific feature (kernel 3.5+).
 // On BSD, macOS, and other platforms this function does nothing.
