@@ -134,6 +134,13 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		isRoot:        isRoot,
 	}
 
+	// Determine secure socket path
+	socketPath, cleanup, err := determineSocketPath(d.isRoot)
+	if err != nil {
+		log.Fatalf("Failed to determine socket path: %v", err)
+	}
+	d.socketPath = socketPath
+
 	// Start Unix socket listener for exec mode reports
 	go d.startSocketListener()
 
@@ -144,6 +151,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	go func() {
 		<-sigChan
 		log.Println("Shutting down...")
+		cleanup() // Cleanup socket path if it was temporary
 		d.shutdown()
 		os.Exit(0)
 	}()
@@ -233,10 +241,46 @@ type daemon struct {
 	osType        string
 	executionMode string
 	isRoot        bool
+	socketPath    string // The runtime socket path (secure)
 	agentID       string
 	conn          *websocket.Conn
 	connMu        sync.Mutex
 	shutdown      func()
+}
+
+// determineSocketPath calculates a secure path for the Unix socket.
+// It returns the full path, a cleanup function, and any error.
+func determineSocketPath(isRoot bool) (string, func(), error) {
+	// 1. Root Mode: Use fixed secure directory
+	if isRoot {
+		return filepath.Join(secureSocketDir, "cc-agent.sock"), func() {}, nil
+	}
+
+	// 2. User Mode: Use XDG_RUNTIME_DIR if available (standard secure location)
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if runtimeDir != "" {
+		return filepath.Join(runtimeDir, "cc-agent.sock"), func() {}, nil
+	}
+
+	// 3. User Mode Fallback: Create a secure temporary directory (0700)
+	// This prevents race conditions and ensures only the user can access the socket.
+	// We use MkdirTemp to create a directory like /tmp/cc-agent-run-12345/
+	dir, err := os.MkdirTemp("", "cc-agent-run-")
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to create secure temp dir: %w", err)
+	}
+
+	// Ensure permissions are strictly 0700 (MkdirTemp usually does this, but being explicit is good)
+	if err := os.Chmod(dir, 0700); err != nil {
+		os.Remove(dir)
+		return "", nil, fmt.Errorf("failed to chmod secure temp dir: %w", err)
+	}
+
+	path := filepath.Join(dir, "cc-agent.sock")
+	cleanup := func() {
+		os.RemoveAll(dir)
+	}
+	return path, cleanup, nil
 }
 
 func (d *daemon) run() {
@@ -377,7 +421,7 @@ func (d *daemon) syncCron(jobs []protocol.JobDefinition) {
 }
 
 func (d *daemon) syncSystemCron(jobs []protocol.JobDefinition) {
-	content := generateCronContent(jobs, true)
+	content := generateCronContent(jobs, true, d.socketPath)
 
 	// Write atomically to /etc/cron.d/croncommander
 	tmpFile := cronFilePath + ".tmp"
@@ -395,7 +439,7 @@ func (d *daemon) syncSystemCron(jobs []protocol.JobDefinition) {
 }
 
 func (d *daemon) syncUserCron(jobs []protocol.JobDefinition) {
-	content := generateCronContent(jobs, false)
+	content := generateCronContent(jobs, false, d.socketPath)
 
 	// Use 'crontab -' to install
 	cmd := exec.Command("crontab", "-")
@@ -408,7 +452,7 @@ func (d *daemon) syncUserCron(jobs []protocol.JobDefinition) {
 	log.Printf("User crontab updated with %d jobs", len(jobs))
 }
 
-func generateCronContent(jobs []protocol.JobDefinition, systemMode bool) []byte {
+func generateCronContent(jobs []protocol.JobDefinition, systemMode bool, socketPath string) []byte {
 	var buf bytes.Buffer
 	buf.Grow(len(jobs) * 100)
 
@@ -495,23 +539,24 @@ func (d *daemon) sendMessage(msg interface{}) error {
 }
 
 func (d *daemon) startSocketListener() {
-	os.Remove(socketPath)
+	// Ensure the socket file doesn't exist (handle clean restarts)
+	os.Remove(d.socketPath)
 
 	oldUmask := syscall.Umask(0117)
-	listener, err := net.Listen("unix", socketPath)
+	listener, err := net.Listen("unix", d.socketPath)
 	syscall.Umask(oldUmask)
 
 	if err != nil {
-		log.Printf("Failed to create socket listener: %v", err)
+		log.Printf("Failed to create socket listener on %s: %v", d.socketPath, err)
 		return
 	}
 	defer listener.Close()
 
 	// In user mode, 0660 is fine for user/group access.
 	// In system mode, it's in /var/lib/croncommander.
-	os.Chmod(socketPath, 0660)
+	os.Chmod(d.socketPath, 0660)
 
-	log.Printf("Listening on %s", socketPath)
+	log.Printf("Listening on %s", d.socketPath)
 
 	d.shutdown = func() {
 		listener.Close()
