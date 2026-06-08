@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 var (
 	execJobID      string
 	execSocketPath string
+	execSpoolDir   string
 )
 
 var execCmd = &cobra.Command{
@@ -38,6 +40,7 @@ func init() {
 	rootCmd.AddCommand(execCmd)
 	execCmd.Flags().StringVarP(&execJobID, "job-id", "j", "", "Job ID for this execution")
 	execCmd.Flags().StringVar(&execSocketPath, "socket-path", "", "Path to daemon socket")
+	execCmd.Flags().StringVar(&execSpoolDir, "spool-dir", "", "Fallback report spool directory")
 }
 
 func runExec(cmd *cobra.Command, args []string) {
@@ -148,20 +151,41 @@ func runExec(cmd *cobra.Command, args []string) {
 	log.Printf("Job executed: job=%s user=%s uid=%d exit=%d cmd=%q",
 		execJobID, executingUser, executingUID, exitCode, report.Command)
 
-	// Send to daemon via Unix socket
-	if err := sendToDaemon(report); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: Failed to send report to daemon: %v\n", err)
+	eventID, idErr := newEventID()
+	if idErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to generate report event ID: %v\n", idErr)
+	} else {
+		record := protocol.LocalExecutionReport{EventID: eventID, Payload: report}
+		if err := sendToDaemon(record); err != nil {
+			spoolDir := execSpoolDir
+			if spoolDir == "" {
+				spoolDir = filepath.Join(filepath.Dir(effectiveSocketPath()), "spool")
+			}
+			if spoolErr := writeSpoolRecord(spoolDir, record); spoolErr != nil {
+				fmt.Fprintf(os.Stderr,
+					"Warning: Failed to send report to daemon (%v) and failed to spool it (%v)\n",
+					err, spoolErr)
+			} else {
+				fmt.Fprintf(os.Stderr,
+					"Warning: Daemon unavailable; execution report %s was spooled locally\n",
+					eventID)
+			}
+		}
 	}
 
 	// Exit with the same code as the wrapped command
 	os.Exit(exitCode)
 }
 
-func sendToDaemon(report protocol.ExecutionReportPayload) error {
-	path := socketPath
+func effectiveSocketPath() string {
 	if execSocketPath != "" {
-		path = execSocketPath
+		return execSocketPath
 	}
+	return socketPath
+}
+
+func sendToDaemon(report protocol.LocalExecutionReport) error {
+	path := effectiveSocketPath()
 	conn, err := net.Dial("unix", path)
 	if err != nil {
 		return fmt.Errorf("failed to connect to daemon socket: %w", err)
@@ -169,11 +193,24 @@ func sendToDaemon(report protocol.ExecutionReportPayload) error {
 	defer conn.Close()
 
 	// Set write deadline
-	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return fmt.Errorf("failed to set daemon write deadline: %w", err)
+	}
 
 	encoder := json.NewEncoder(conn)
 	if err := encoder.Encode(report); err != nil {
 		return fmt.Errorf("failed to send report: %w", err)
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return fmt.Errorf("failed to set daemon read deadline: %w", err)
+	}
+	var acknowledgement protocol.LocalReportAck
+	if err := json.NewDecoder(conn).Decode(&acknowledgement); err != nil {
+		return fmt.Errorf("failed to read daemon acknowledgement: %w", err)
+	}
+	if !acknowledgement.Accepted {
+		return fmt.Errorf("daemon rejected report: %s", acknowledgement.Error)
 	}
 
 	return nil
