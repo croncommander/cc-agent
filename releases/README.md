@@ -49,8 +49,14 @@ curl -sSL https://croncommander.com/install.sh | bash
 
 ## Versioning
 
-The version is managed centrally in `/VERSION` at the project root. To create a new release:
+The version is managed centrally in `/VERSION` at the project root. Before
+every build, review the changes and increase the version using semantic
+versioning. Never deploy or publish a changed binary under a previously used
+version.
 
-1. Update `/VERSION` (e.g. `1.2.0`)
+To create a new release:
+
+1. Review the changes and update `/VERSION` with the appropriate major, minor,
+   or patch increase
 2. Run `make publish`
 3. New binaries appear here with the updated version in the filename

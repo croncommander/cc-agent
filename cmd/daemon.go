@@ -322,6 +322,7 @@ func (d *daemon) register() error {
 		Os:            d.osType,
 		ExecutionMode: d.executionMode,
 		IsRoot:        d.isRoot,
+		Version:       version,
 	}
 	var response protocol.RegisterResponse
 	err := d.postJSON("/api/v2/agents/register", map[string]string{
@@ -352,7 +353,10 @@ func (d *daemon) register() error {
 }
 
 func (d *daemon) poll() error {
-	request := protocol.PollRequest{ManifestVersion: d.state.ManifestVersion}
+	request := protocol.PollRequest{
+		ManifestVersion: d.state.ManifestVersion,
+		Version:         version,
+	}
 	var response protocol.PollResponse
 	path := fmt.Sprintf("/api/v2/agents/%s/poll", url.PathEscape(d.state.AgentID))
 	err := d.postJSON(path, d.authorizationHeaders(), request, &response)

@@ -5,6 +5,7 @@ type RegisterRequest struct {
 	Os            string `json:"os"`
 	ExecutionMode string `json:"executionMode"`
 	IsRoot        bool   `json:"isRoot"`
+	Version       string `json:"version,omitempty"`
 }
 
 type RegisterResponse struct {
@@ -16,6 +17,7 @@ type RegisterResponse struct {
 
 type PollRequest struct {
 	ManifestVersion string `json:"manifestVersion,omitempty"`
+	Version         string `json:"version,omitempty"`
 }
 
 type PollResponse struct {

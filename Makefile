@@ -1,12 +1,13 @@
 BINARY_NAME=cc-agent
 BUILD_DIR=bin
-VERSION := $(shell cat ../VERSION 2>/dev/null || echo "0.0.0")
+LOCAL_BUILD_DIR=../build
+VERSION := $(shell cat VERSION 2>/dev/null || echo "0.0.0")
 VERSION_DASHED := $(subst .,-,$(VERSION))
 LDFLAGS=-ldflags "-s -w -X main.Version=$(VERSION)"
 
 PLATFORMS=linux/amd64 linux/arm64 linux/386 darwin/amd64 darwin/arm64 freebsd/amd64 freebsd/arm64 freebsd/386
 
-.PHONY: all clean build publish $(PLATFORMS)
+.PHONY: all clean build local-linux-amd64 publish $(PLATFORMS)
 
 all: clean build
 
@@ -20,6 +21,11 @@ $(PLATFORMS):
 clean:
 	@echo "Cleaning executables..."
 	@rm -rf $(BUILD_DIR)
+
+local-linux-amd64: linux/amd64
+	@mkdir -p $(LOCAL_BUILD_DIR)
+	@cp $(BUILD_DIR)/$(BINARY_NAME)-$(VERSION_DASHED)-linux-amd64 $(LOCAL_BUILD_DIR)/$(BINARY_NAME)-linux-amd64
+	@echo "Synced $(BINARY_NAME) v$(VERSION) to $(LOCAL_BUILD_DIR)/$(BINARY_NAME)-linux-amd64"
 
 publish: build
 	@echo "Publishing release v$(VERSION)..."

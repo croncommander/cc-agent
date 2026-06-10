@@ -62,6 +62,11 @@ func TestHTTPRegistrationPollingAndDurableReportDelivery(t *testing.T) {
 	var mutex sync.Mutex
 	var reportAttempts int
 	var receivedEventID string
+	var receivedVersion string
+	var receivedPollVersion string
+	previousVersion := version
+	SetVersion("1.2.3")
+	defer SetVersion(previousVersion)
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -71,6 +76,12 @@ func TestHTTPRegistrationPollingAndDurableReportDelivery(t *testing.T) {
 				http.Error(writer, "missing workspace key", http.StatusUnauthorized)
 				return
 			}
+			var registration protocol.RegisterRequest
+			if err := json.NewDecoder(request.Body).Decode(&registration); err != nil {
+				http.Error(writer, "invalid registration", http.StatusBadRequest)
+				return
+			}
+			receivedVersion = registration.Version
 			_ = json.NewEncoder(writer).Encode(protocol.RegisterResponse{
 				AgentID:             "11111111-1111-4111-8111-111111111111",
 				AgentToken:          "agent-token",
@@ -82,6 +93,12 @@ func TestHTTPRegistrationPollingAndDurableReportDelivery(t *testing.T) {
 				http.Error(writer, "invalid token", http.StatusUnauthorized)
 				return
 			}
+			var pollRequest protocol.PollRequest
+			if err := json.NewDecoder(request.Body).Decode(&pollRequest); err != nil {
+				http.Error(writer, "invalid poll", http.StatusBadRequest)
+				return
+			}
+			receivedPollVersion = pollRequest.Version
 			_ = json.NewEncoder(writer).Encode(protocol.PollResponse{
 				ManifestVersion: "manifest-1",
 				Changed:         false,
@@ -128,6 +145,9 @@ func TestHTTPRegistrationPollingAndDurableReportDelivery(t *testing.T) {
 	if d.state.AgentToken != "agent-token" {
 		t.Fatalf("Agent token = %q", d.state.AgentToken)
 	}
+	if receivedVersion != "1.2.3" {
+		t.Fatalf("Registration version = %q", receivedVersion)
+	}
 	stateInfo, err := os.Stat(d.stateFile)
 	if err != nil {
 		t.Fatalf("State file was not created: %v", err)
@@ -160,6 +180,9 @@ func TestHTTPRegistrationPollingAndDurableReportDelivery(t *testing.T) {
 	}
 	if err := d.poll(); err != nil {
 		t.Fatalf("Poll failed: %v", err)
+	}
+	if receivedPollVersion != "1.2.3" {
+		t.Fatalf("Poll version = %q", receivedPollVersion)
 	}
 
 	mutex.Lock()

@@ -144,6 +144,19 @@ Default config location: `/etc/croncommander/config.yaml`
 - Go 1.23+
 - The root `VERSION` file (read automatically by the Makefile)
 
+### Version Review
+
+Before every agent build, review the changes since the previous build and
+increase the root `VERSION` value using semantic versioning:
+
+- Patch for backward-compatible fixes
+- Minor for backward-compatible features
+- Major for breaking changes
+
+Do not distribute or deploy a changed agent binary under a previously used
+version. The build embeds this value in the binary and reports it to
+CronCommander during registration and polling.
+
 ### Build
 
 ```bash
@@ -151,6 +164,12 @@ make build
 ```
 
 Produces versioned binaries in `bin/`, e.g. `cc-agent-1-1-0-linux-amd64`.
+
+For the local Docker Compose agents, build and sync the Linux amd64 artifact:
+
+```bash
+make local-linux-amd64
+```
 
 ### Publish Release
 
