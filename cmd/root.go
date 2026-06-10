@@ -23,7 +23,7 @@ var rootCmd = &cobra.Command{
 to the CronCommander control plane.
 
 It operates in two modes:
-  daemon - Runs as a service, maintains WebSocket connection
+  daemon - Runs as a service, polls the HTTPS gateway
   exec   - Wraps a command, captures output, reports to daemon`,
 }
 

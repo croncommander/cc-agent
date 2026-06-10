@@ -11,7 +11,7 @@ CronCommander Agent is a lightweight Go binary that connects your servers to the
 
 ## Features
 
-- **Daemon Mode**: Long-lived agent connecting via WebSocket to `gateway.croncommander.com`
+- **Daemon Mode**: Long-lived agent using short HTTPS requests to `gateway.croncommander.com`
 - **Cron Synchronization**: Receives job definitions from the server and writes them to `/etc/cron.d/croncommander`
 - **Execution Wrapper**: Wraps each job to capture stdout/stderr, exit codes, and timing
 - **Dual Modes**: User Mode (unprivileged, manages its own crontab) or System Mode (root, manages `/etc/cron.d`)
@@ -53,7 +53,9 @@ The installer auto-detects your OS and architecture and downloads the correct bi
    sudo mkdir -p /etc/croncommander
    sudo tee /etc/croncommander/config.yaml > /dev/null <<EOF
    api_key: your-api-key
-   server_url: wss://gateway.croncommander.com/
+   server_url: https://gateway.croncommander.com
+   state_file: /var/lib/croncommander/agent-state.json
+   spool_dir: /var/lib/croncommander/spool
    EOF
    ```
 
@@ -66,7 +68,8 @@ The installer auto-detects your OS and architecture and downloads the correct bi
 
 ### Daemon Mode
 
-The agent runs as a daemon, maintaining a WebSocket connection to the CronCommander gateway:
+The agent runs as a daemon, polling the CronCommander gateway with a randomized
+30-90 second interval:
 
 ```bash
 cc-agent daemon --config /etc/croncommander/config.yaml
@@ -118,8 +121,15 @@ version: 1.1.0
 # Workspace API key for authentication
 api_key: your-workspace-api-key
 
-# WebSocket gateway URL
-server_url: wss://gateway.croncommander.com/
+# HTTPS gateway origin
+server_url: https://gateway.croncommander.com
+
+# Agent-scoped credential, manifest state, and durable report queue
+state_file: /var/lib/croncommander/agent-state.json
+spool_dir: /var/lib/croncommander/spool
+
+# Local development only; leave false in production
+allow_insecure_http: false
 
 # Execution mode: "user" (default) or "system"
 execution_mode: user
@@ -166,8 +176,8 @@ go test ./...
 │  │  cc-agent    │◄───│  /etc/cron.d/croncommander  │   │
 │  │  (daemon)    │    └─────────────────────────────┘   │
 │  │              │                                       │
-│  │  WebSocket   │    ┌─────────────────────────────┐   │
-│  │  connection  │◄───│  cc-agent exec              │   │
+│  │ HTTPS poller │    ┌─────────────────────────────┐   │
+│  │ and spool    │◄───│  cc-agent exec              │   │
 │  │              │    │  (reports via Unix socket)  │   │
 │  └──────┬───────┘    └─────────────────────────────┘   │
 │         │                                               │

@@ -1,36 +1,27 @@
 package protocol
 
-// Message is the base message type
-type Message struct {
-	Type string `json:"type"`
-}
-
-// RegisterMessage is sent by agent to register with the listener
-type RegisterMessage struct {
-	Type          string `json:"type"`
-	ApiKey        string `json:"apiKey"`
+type RegisterRequest struct {
 	Hostname      string `json:"hostname"`
 	Os            string `json:"os"`
 	ExecutionMode string `json:"executionMode"`
 	IsRoot        bool   `json:"isRoot"`
 }
 
-// RegisterAckMessage is the response to registration
-type RegisterAckMessage struct {
-	Type    string `json:"type"`
-	Status  string `json:"status"`
-	AgentID string `json:"agentId,omitempty"`
-	Reason  string `json:"reason,omitempty"`
+type RegisterResponse struct {
+	AgentID             string `json:"agentId"`
+	AgentToken          string `json:"agentToken"`
+	PollIntervalSeconds int    `json:"pollIntervalSeconds"`
+	PollJitterSeconds   int    `json:"pollJitterSeconds"`
 }
 
-// HeartbeatMessage is sent periodically to maintain connection
-type HeartbeatMessage struct {
-	Type string `json:"type"`
+type PollRequest struct {
+	ManifestVersion string `json:"manifestVersion,omitempty"`
 }
 
-// HeartbeatAckMessage is the response to heartbeat
-type HeartbeatAckMessage struct {
-	Type string `json:"type"`
+type PollResponse struct {
+	ManifestVersion string          `json:"manifestVersion"`
+	Changed         bool            `json:"changed"`
+	Jobs            []JobDefinition `json:"jobs"`
 }
 
 // ExecutionReportPayload contains the execution details
@@ -48,22 +39,21 @@ type ExecutionReportPayload struct {
 	DurationMs    int    `json:"durationMs"`
 }
 
-// ExecutionReportMessage wraps an execution report
-type ExecutionReportMessage struct {
-	Type    string                 `json:"type"`
+type SpooledReport struct {
+	EventID string                 `json:"eventId"`
 	Payload ExecutionReportPayload `json:"payload"`
 }
 
-// ReportAckMessage acknowledges receipt of an execution report
-type ReportAckMessage struct {
-	Type        string `json:"type"`
+type LocalExecutionReport = SpooledReport
+
+type ReportResponse struct {
 	ExecutionID string `json:"executionId"`
+	Duplicate   bool   `json:"duplicate"`
 }
 
-// SyncJobsMessage contains job definitions to sync
-type SyncJobsMessage struct {
-	Type string          `json:"type"`
-	Jobs []JobDefinition `json:"jobs"`
+type LocalReportAck struct {
+	Accepted bool   `json:"accepted"`
+	Error    string `json:"error,omitempty"`
 }
 
 // JobDefinition represents a cron job to be synced
@@ -71,10 +61,4 @@ type JobDefinition struct {
 	JobID          string `json:"jobId"`
 	CronExpression string `json:"cronExpression"`
 	Command        string `json:"command"`
-}
-
-// ErrorMessage indicates a protocol error
-type ErrorMessage struct {
-	Type   string `json:"type"`
-	Reason string `json:"reason"`
 }
