@@ -64,6 +64,8 @@ func TestHTTPRegistrationPollingAndDurableReportDelivery(t *testing.T) {
 	var receivedEventID string
 	var receivedVersion string
 	var receivedPollVersion string
+	var receivedDiscoveryEventID string
+	var receivedDiscovery protocol.DiscoveryReportPayload
 	previousVersion := version
 	SetVersion("1.2.3")
 	defer SetVersion(previousVersion)
@@ -117,6 +119,21 @@ func TestHTTPRegistrationPollingAndDurableReportDelivery(t *testing.T) {
 			_ = json.NewEncoder(writer).Encode(protocol.ReportResponse{
 				ExecutionID: "22222222-2222-4222-8222-222222222222",
 			})
+		case "/api/v2/agents/11111111-1111-4111-8111-111111111111/discovery-reports":
+			if request.Header.Get("Authorization") != "Bearer agent-token" {
+				http.Error(writer, "invalid token", http.StatusUnauthorized)
+				return
+			}
+			receivedDiscoveryEventID = request.Header.Get("Idempotency-Key")
+			if err := json.NewDecoder(request.Body).Decode(&receivedDiscovery); err != nil {
+				http.Error(writer, "invalid discovery", http.StatusBadRequest)
+				return
+			}
+			writer.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(writer).Encode(protocol.DiscoveryReportResponse{
+				DiscoveryReportID: "44444444-4444-4444-8444-444444444444",
+				DiscoveredCount:   len(receivedDiscovery.Jobs),
+			})
 		default:
 			http.NotFound(writer, request)
 		}
@@ -147,6 +164,24 @@ func TestHTTPRegistrationPollingAndDurableReportDelivery(t *testing.T) {
 	}
 	if receivedVersion != "1.2.3" {
 		t.Fatalf("Registration version = %q", receivedVersion)
+	}
+	if err := d.discoverAndReport(discoveryScanner{
+		listCrontab: func() ([]byte, error) {
+			return []byte("0 0 * * * /usr/local/sbin/wordpress-db-backup\n"), nil
+		},
+		currentUser: func() string { return "cc-agent-user" },
+	}); err != nil {
+		t.Fatalf("Discovery failed: %v", err)
+	}
+	if receivedDiscoveryEventID == "" {
+		t.Fatal("Discovery omitted Idempotency-Key")
+	}
+	if len(receivedDiscovery.Jobs) != 1 ||
+		receivedDiscovery.Jobs[0].Command != "/usr/local/sbin/wordpress-db-backup" {
+		t.Fatalf("Unexpected discovery payload: %#v", receivedDiscovery)
+	}
+	if d.state.LastDiscoveryAt == "" {
+		t.Fatal("Discovery timestamp was not persisted")
 	}
 	stateInfo, err := os.Stat(d.stateFile)
 	if err != nil {

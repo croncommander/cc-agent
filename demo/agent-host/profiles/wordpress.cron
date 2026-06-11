@@ -1,0 +1,4 @@
+*/5 * * * * root /opt/demo/bin/demo-task wordpress-cron
+0 0 * * * root /opt/demo/bin/demo-task wordpress-db-backup
+30 1 * * * root /opt/demo/bin/demo-task wordpress-content-backup
+15 3 * * 0 root /opt/demo/bin/demo-task wordpress-security-scan

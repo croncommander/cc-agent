@@ -1,0 +1,4 @@
+*/30 * * * * root /opt/demo/bin/demo-task snapshot
+15 2 * * * root /opt/demo/bin/demo-task retention
+0 3 * * * root /opt/demo/bin/demo-task offsite-sync
+30 4 * * 0 root /opt/demo/bin/demo-task restore-test

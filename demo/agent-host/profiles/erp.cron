@@ -1,0 +1,4 @@
+*/10 * * * * root /opt/demo/bin/demo-task inventory-sync
+0 2 * * * root /opt/demo/bin/demo-task invoice-batch
+7 * * * * root /opt/demo/bin/demo-task exchange-rates
+45 23 28-31 * * root /opt/demo/bin/demo-task accounting-close

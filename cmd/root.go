@@ -23,8 +23,9 @@ var rootCmd = &cobra.Command{
 to the CronCommander control plane.
 
 It operates in two modes:
-  daemon - Runs as a service, polls the HTTPS gateway
-  exec   - Wraps a command, captures output, reports to daemon`,
+  daemon   - Runs as a service, polls the HTTPS gateway
+  discover - Scans existing cron entries for import review
+  exec     - Wraps a command, captures output, reports to daemon`,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

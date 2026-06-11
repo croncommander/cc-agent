@@ -1,0 +1,4 @@
+15 1 * * * root /opt/demo/bin/demo-task settlement
+20 * * * * root /opt/demo/bin/demo-task reconciliation
+0 4 1 * * root /opt/demo/bin/demo-task tax-export
+40 2 * * * root /opt/demo/bin/demo-task fraud-rules
