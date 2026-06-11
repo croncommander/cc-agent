@@ -53,6 +53,25 @@ type ReportResponse struct {
 	Duplicate   bool   `json:"duplicate"`
 }
 
+type DiscoveryReportPayload struct {
+	ScannedAt string          `json:"scannedAt"`
+	Jobs      []DiscoveredJob `json:"jobs"`
+}
+
+type DiscoveredJob struct {
+	CronExpression string `json:"cronExpression"`
+	Command        string `json:"command"`
+	RunAsUser      string `json:"runAsUser,omitempty"`
+	SourceFile     string `json:"sourceFile"`
+	LineNumber     int    `json:"lineNumber,omitempty"`
+}
+
+type DiscoveryReportResponse struct {
+	DiscoveryReportID string `json:"discoveryReportId"`
+	Duplicate         bool   `json:"duplicate"`
+	DiscoveredCount   int    `json:"discoveredCount"`
+}
+
 type LocalReportAck struct {
 	Accepted bool   `json:"accepted"`
 	Error    string `json:"error,omitempty"`

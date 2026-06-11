@@ -13,6 +13,7 @@ CronCommander Agent is a lightweight Go binary that connects your servers to the
 
 - **Daemon Mode**: Long-lived agent using short HTTPS requests to `gateway.croncommander.com`
 - **Cron Synchronization**: Receives job definitions from the server and writes them to `/etc/cron.d/croncommander`
+- **Cron Discovery**: Scans existing user and system cron sources for review and import
 - **Execution Wrapper**: Wraps each job to capture stdout/stderr, exit codes, and timing
 - **Dual Modes**: User Mode (unprivileged, manages its own crontab) or System Mode (root, manages `/etc/cron.d`)
 - **Security Hardened**: No-new-privileges, minimal environment, controlled working directory
@@ -89,6 +90,18 @@ This captures:
 - stdout/stderr output (capped at 256KB each)
 - Executing user and UID
 
+### Discovery
+
+The daemon scans after registration and then on the configured discovery
+interval (24 hours by default). Run an on-demand scan with:
+
+```bash
+cc-agent discover --config /etc/croncommander/config.yaml
+```
+
+User mode scans the agent user's crontab. System mode also scans
+`/etc/crontab` and `/etc/cron.d`, excluding CronCommander-managed entries.
+
 ### Version
 
 ```bash
@@ -133,6 +146,9 @@ allow_insecure_http: false
 
 # Execution mode: "user" (default) or "system"
 execution_mode: user
+
+# Full host cron scan interval (minimum 5m)
+discovery_interval: 24h
 ```
 
 Default config location: `/etc/croncommander/config.yaml`
@@ -142,12 +158,12 @@ Default config location: `/etc/croncommander/config.yaml`
 ### Requirements
 
 - Go 1.23+
-- The root `VERSION` file (read automatically by the Makefile)
+- The repository `VERSION` file (read automatically by the Makefile)
 
 ### Version Review
 
 Before every agent build, review the changes since the previous build and
-increase the root `VERSION` value using semantic versioning:
+increase the repository `VERSION` value using semantic versioning:
 
 - Patch for backward-compatible fixes
 - Minor for backward-compatible features

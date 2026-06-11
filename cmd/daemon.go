@@ -86,35 +86,39 @@ type Config struct {
 	ApiKey            string `yaml:"api_key"`
 	ServerURL         string `yaml:"server_url"`
 	ExecutionMode     string `yaml:"execution_mode"`
+	DiscoveryInterval string `yaml:"discovery_interval"`
 	StateFile         string `yaml:"state_file"`
 	SpoolDir          string `yaml:"spool_dir"`
 	AllowInsecureHTTP bool   `yaml:"allow_insecure_http"`
 }
 
 type agentState struct {
-	AgentID         string `json:"agentId"`
-	AgentToken      string `json:"agentToken"`
-	ManifestVersion string `json:"manifestVersion,omitempty"`
+	AgentID          string            `json:"agentId"`
+	AgentToken       string            `json:"agentToken"`
+	ManifestVersion  string            `json:"manifestVersion,omitempty"`
+	LastDiscoveryAt  string            `json:"lastDiscoveryAt,omitempty"`
+	PendingDiscovery *pendingDiscovery `json:"pendingDiscovery,omitempty"`
 }
 
 type daemon struct {
-	apiKey        string
-	serverURL     string
-	hostname      string
-	osType        string
-	executionMode string
-	isRoot        bool
-	stateFile     string
-	spoolDir      string
-	state         agentState
-	httpClient    *http.Client
-	pollInterval  time.Duration
-	pollJitter    time.Duration
-	stop          chan struct{}
-	wake          chan struct{}
-	stopOnce      sync.Once
-	listenerMu    sync.Mutex
-	listener      net.Listener
+	apiKey         string
+	serverURL      string
+	hostname       string
+	osType         string
+	executionMode  string
+	isRoot         bool
+	stateFile      string
+	spoolDir       string
+	state          agentState
+	httpClient     *http.Client
+	pollInterval   time.Duration
+	pollJitter     time.Duration
+	discoveryEvery time.Duration
+	stop           chan struct{}
+	wake           chan struct{}
+	stopOnce       sync.Once
+	listenerMu     sync.Mutex
+	listener       net.Listener
 }
 
 func runDaemon(cmd *cobra.Command, args []string) {
@@ -125,6 +129,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	executionMode := "user"
 	stateFile, spoolDir := defaultRuntimePaths(configPath)
 	allowInsecureHTTP := false
+	discoveryEvery := defaultDiscoveryInterval
 
 	if config != nil {
 		if apiKey == "" {
@@ -141,6 +146,13 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		}
 		if config.SpoolDir != "" {
 			spoolDir = config.SpoolDir
+		}
+		if config.DiscoveryInterval != "" {
+			parsed, err := parseDiscoveryInterval(config.DiscoveryInterval)
+			if err != nil {
+				log.Fatalf("Invalid discovery_interval: %v", err)
+			}
+			discoveryEvery = parsed
 		}
 		allowInsecureHTTP = config.AllowInsecureHTTP
 	}
@@ -160,19 +172,20 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	}
 
 	d := &daemon{
-		apiKey:        apiKey,
-		serverURL:     normalizedURL,
-		hostname:      getHostname(),
-		osType:        getOsInfo(),
-		executionMode: executionMode,
-		isRoot:        isRoot,
-		stateFile:     stateFile,
-		spoolDir:      spoolDir,
-		httpClient:    newHTTPClient(),
-		pollInterval:  defaultPoll,
-		pollJitter:    defaultPollJitter,
-		stop:          make(chan struct{}),
-		wake:          make(chan struct{}, 1),
+		apiKey:         apiKey,
+		serverURL:      normalizedURL,
+		hostname:       getHostname(),
+		osType:         getOsInfo(),
+		executionMode:  executionMode,
+		isRoot:         isRoot,
+		stateFile:      stateFile,
+		spoolDir:       spoolDir,
+		httpClient:     newHTTPClient(),
+		pollInterval:   defaultPoll,
+		pollJitter:     defaultPollJitter,
+		discoveryEvery: discoveryEvery,
+		stop:           make(chan struct{}),
+		wake:           make(chan struct{}, 1),
 	}
 
 	if err := d.loadState(); err != nil {
@@ -200,8 +213,12 @@ func runDaemon(cmd *cobra.Command, args []string) {
 }
 
 func loadConfig() (*Config, string) {
+	return loadConfigWithPrimary(daemonConfigFile)
+}
+
+func loadConfigWithPrimary(primary string) (*Config, string) {
 	configPaths := []string{
-		daemonConfigFile,
+		primary,
 		"/etc/croncommander/config.yaml",
 		"/etc/croncommander/config.yml",
 		filepath.Join(os.Getenv("HOME"), ".croncommander/config.yaml"),
@@ -312,6 +329,11 @@ func (d *daemon) cycle() error {
 	}
 	if err := d.flushSpool(); err != nil {
 		return err
+	}
+	if d.discoveryDue(time.Now()) {
+		if err := d.discoverAndReport(defaultDiscoveryScanner()); err != nil {
+			log.Printf("Cron discovery failed: %v", err)
+		}
 	}
 	return d.poll()
 }
