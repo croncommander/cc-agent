@@ -35,6 +35,8 @@ CC_API_KEY="your-api-key" \
 ```
 
 The installer auto-detects your OS and architecture and downloads the correct binary.
+Remote installs also download the adjacent `.sha256` asset and refuse to
+install a binary that does not match it.
 
 ### Manual Installation
 
@@ -43,13 +45,18 @@ The installer auto-detects your OS and architecture and downloads the correct bi
    make build
    ```
 
-2. **Install the binary**:
+2. **Verify the binary**:
    ```bash
-   sudo cp bin/cc-agent-*-linux-amd64 /usr/local/bin/cc-agent
+   sha256sum -c cc-agent-2-2-0-linux-amd64.sha256
+   ```
+
+3. **Install the binary**:
+   ```bash
+   sudo cp cc-agent-2-2-0-linux-amd64 /usr/local/bin/cc-agent
    sudo chmod 755 /usr/local/bin/cc-agent
    ```
 
-3. **Create config**:
+4. **Create config**:
    ```bash
    sudo mkdir -p /etc/croncommander
    sudo tee /etc/croncommander/config.yaml > /dev/null <<EOF
@@ -60,7 +67,7 @@ The installer auto-detects your OS and architecture and downloads the correct bi
    EOF
    ```
 
-4. **Run**:
+5. **Run**:
    ```bash
    cc-agent daemon --config /etc/croncommander/config.yaml
    ```
@@ -129,7 +136,7 @@ The agent is configured via YAML file:
 
 ```yaml
 # Agent version
-version: 1.1.0
+version: 2.2.0
 
 # Workspace API key for authentication
 api_key: your-workspace-api-key
@@ -179,7 +186,9 @@ CronCommander during registration and polling.
 make build
 ```
 
-Produces versioned binaries in `bin/`, e.g. `cc-agent-1-1-0-linux-amd64`.
+Produces versioned binaries and adjacent checksum files in `bin/`, e.g.
+`cc-agent-2-2-0-linux-amd64` and
+`cc-agent-2-2-0-linux-amd64.sha256`.
 
 For the local Docker Compose agents, build and sync the Linux amd64 artifact:
 
@@ -193,7 +202,8 @@ make local-linux-amd64
 make publish
 ```
 
-Copies binaries to `releases/` and `../build/` for local development.
+Copies binaries and checksums to `releases/` and `../build/` for local
+development.
 
 ### Testing
 

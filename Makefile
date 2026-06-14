@@ -17,6 +17,7 @@ $(PLATFORMS):
 	@echo "Building $(BINARY_NAME)-$(VERSION_DASHED)-$(word 1, $(subst /, ,$@))-$(word 2, $(subst /, ,$@))"
 	@mkdir -p $(BUILD_DIR)
 	@GOOS=$(word 1, $(subst /, ,$@)) GOARCH=$(word 2, $(subst /, ,$@)) CGO_ENABLED=0 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-$(VERSION_DASHED)-$(word 1, $(subst /, ,$@))-$(word 2, $(subst /, ,$@)) .
+	@cd $(BUILD_DIR) && sha256sum $(BINARY_NAME)-$(VERSION_DASHED)-$(word 1, $(subst /, ,$@))-$(word 2, $(subst /, ,$@)) > $(BINARY_NAME)-$(VERSION_DASHED)-$(word 1, $(subst /, ,$@))-$(word 2, $(subst /, ,$@)).sha256
 
 clean:
 	@echo "Cleaning executables..."
@@ -25,15 +26,16 @@ clean:
 local-linux-amd64: linux/amd64
 	@mkdir -p $(LOCAL_BUILD_DIR)
 	@cp $(BUILD_DIR)/$(BINARY_NAME)-$(VERSION_DASHED)-linux-amd64 $(LOCAL_BUILD_DIR)/$(BINARY_NAME)-linux-amd64
+	@cd $(LOCAL_BUILD_DIR) && sha256sum $(BINARY_NAME)-linux-amd64 > $(BINARY_NAME)-linux-amd64.sha256
 	@echo "Synced $(BINARY_NAME) v$(VERSION) to $(LOCAL_BUILD_DIR)/$(BINARY_NAME)-linux-amd64"
 
 publish: build
 	@echo "Publishing release v$(VERSION)..."
 	@mkdir -p releases
-	@cp $(BUILD_DIR)/* releases/
+	@cp $(BUILD_DIR)/$(BINARY_NAME)-$(VERSION_DASHED)-* releases/
 	@echo "Release binaries copied to releases/"
 	@echo ""
 	@echo "Syncing to ../build for local development..."
 	@mkdir -p ../build
-	@cp $(BUILD_DIR)/* ../build/
+	@cp $(BUILD_DIR)/$(BINARY_NAME)-$(VERSION_DASHED)-* ../build/
 	@echo "Build sync complete."
