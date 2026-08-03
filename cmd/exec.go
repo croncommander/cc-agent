@@ -192,6 +192,15 @@ func sendToDaemon(report protocol.LocalExecutionReport) error {
 	}
 	defer conn.Close()
 
+	// SECURITY: Verify that we connected to the correct socket peer.
+	// This prevents Information Disclosure if an attacker pre-creates the socket
+	// in a shared directory (like /tmp).
+	if unixConn, ok := conn.(*net.UnixConn); ok {
+		if err := verifySocketPeer(unixConn); err != nil {
+			return fmt.Errorf("socket security verification failed: %w", err)
+		}
+	}
+
 	// Set write deadline
 	if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return fmt.Errorf("failed to set daemon write deadline: %w", err)

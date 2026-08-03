@@ -2,9 +2,22 @@
 
 package cmd
 
+import (
+	"net"
+	"os"
+)
+
 // setNoNewPrivs is a no-op on non-Linux platforms.
 // PR_SET_NO_NEW_PRIVS is a Linux-specific feature (kernel 3.5+).
 // On BSD, macOS, and other platforms this function does nothing.
 func setNoNewPrivs() {
 	// No-op: PR_SET_NO_NEW_PRIVS not available on this platform
+}
+
+var getCurrentUid = os.Geteuid
+
+// verifySocketPeer is a no-op on non-Linux platforms.
+// SO_PEERCRED is Linux-specific.
+func verifySocketPeer(conn *net.UnixConn) error {
+	return nil
 }
