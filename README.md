@@ -12,7 +12,7 @@ CronCommander Agent is a lightweight Go binary that connects your servers to the
 ## Features
 
 - **Daemon Mode**: Long-lived agent using short HTTPS requests to `gateway.croncommander.com`
-- **Cron Synchronization**: Receives job definitions from the server and writes them to `/etc/cron.d/croncommander`
+- **Cron Synchronization**: Receives the deterministic, plan-eligible job manifest from the server and writes it to `/etc/cron.d/croncommander`. Plan enforcement stays in the control plane, so jobs suppressed after a downgrade are not deleted by the agent.
 - **Cron Discovery**: Scans existing user and system cron sources for review and import
 - **Execution Wrapper**: Wraps each job to capture stdout/stderr, exit codes, and timing
 - **Bounded Durable Spool**: Retains reports across outages with configurable age, record, and byte limits
