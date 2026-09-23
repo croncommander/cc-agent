@@ -21,6 +21,12 @@ CronCommander Agent is a lightweight Go binary that connects your servers to the
 
 ## Installation
 
+> **Release status:** v2.2.0 binaries and checksums are staged in this
+> repository, but the corresponding GitHub Release has not been published yet.
+> The public installer and the release download URLs below will work only after
+> that release is published. Until then, build from source or use an approved
+> early-access artifact.
+
 ### Quick Install (Linux / FreeBSD / macOS)
 
 ```bash
@@ -40,7 +46,8 @@ install a binary that does not match it.
 
 ### Manual Installation
 
-1. **Download the binary** from [releases/](releases/) or build from source:
+1. **Download the binary** from the published GitHub Release, use an approved
+   artifact from [releases/](releases/), or build from source:
    ```bash
    make build
    ```

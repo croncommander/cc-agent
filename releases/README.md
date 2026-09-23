@@ -61,4 +61,10 @@ To create a new release:
 1. Review the changes and update `/VERSION` with the appropriate major, minor,
    or patch increase
 2. Run `make publish`
-3. New binaries appear here with the updated version in the filename
+3. Create the matching Git tag and GitHub Release
+4. Upload every platform binary and its adjacent `.sha256` file as release assets
+5. Verify that `https://croncommander.com/install.sh` can download and validate
+   each supported platform artifact before announcing the release
+
+Files committed to this directory are staging artifacts; they do not make the
+GitHub Release download URLs available by themselves.
