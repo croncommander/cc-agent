@@ -1,7 +1,7 @@
 ![GitHub stars](https://img.shields.io/github/stars/croncommander/cc-agent?style=social)
 ![License](https://img.shields.io/github/license/croncommander/cc-agent)
 [![cc-spec](https://img.shields.io/badge/spec-cc--spec-blue)](https://github.com/croncommander/cc-spec)
-[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 
 # cc-agent
 
@@ -21,11 +21,8 @@ CronCommander Agent is a lightweight Go binary that connects your servers to the
 
 ## Installation
 
-> **Release status:** v2.2.0 binaries and checksums are staged in this
-> repository, but the corresponding GitHub Release has not been published yet.
-> The public installer and the release download URLs below will work only after
-> that release is published. Until then, build from source or use an approved
-> early-access artifact.
+> **Current release:** v2.2.1. Published binaries and adjacent SHA-256
+> checksums are available from the GitHub Releases page.
 
 ### Quick Install (Linux / FreeBSD / macOS)
 
@@ -46,20 +43,19 @@ install a binary that does not match it.
 
 ### Manual Installation
 
-1. **Download the binary** from the published GitHub Release, use an approved
-   artifact from [releases/](releases/), or build from source:
+1. **Download the binary** from the published GitHub Release or build from source:
    ```bash
    make build
    ```
 
 2. **Verify the binary**:
    ```bash
-   sha256sum -c cc-agent-2-2-0-linux-amd64.sha256
+   sha256sum -c cc-agent-2-2-1-linux-amd64.sha256
    ```
 
 3. **Install the binary**:
    ```bash
-   sudo cp cc-agent-2-2-0-linux-amd64 /usr/local/bin/cc-agent
+   sudo cp cc-agent-2-2-1-linux-amd64 /usr/local/bin/cc-agent
    sudo chmod 755 /usr/local/bin/cc-agent
    ```
 
@@ -142,9 +138,6 @@ For more details, see [Security Documentation](https://croncommander.com/docs.ht
 The agent is configured via YAML file:
 
 ```yaml
-# Agent version
-version: 2.2.0
-
 # Workspace API key for authentication
 api_key: your-workspace-api-key
 
@@ -171,7 +164,7 @@ Default config location: `/etc/croncommander/config.yaml`
 
 ### Requirements
 
-- Go 1.23+
+- Go 1.25+
 - The repository `VERSION` file (read automatically by the Makefile)
 
 ### Version Review
@@ -194,8 +187,8 @@ make build
 ```
 
 Produces versioned binaries and adjacent checksum files in `bin/`, e.g.
-`cc-agent-2-2-0-linux-amd64` and
-`cc-agent-2-2-0-linux-amd64.sha256`.
+`cc-agent-2-2-1-linux-amd64` and
+`cc-agent-2-2-1-linux-amd64.sha256`.
 
 For the local Docker Compose agents, build and sync the Linux amd64 artifact:
 
