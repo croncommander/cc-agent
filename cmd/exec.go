@@ -17,9 +17,12 @@ import (
 )
 
 var (
-	execJobID      string
-	execSocketPath string
-	execSpoolDir   string
+	execJobID           string
+	execSocketPath      string
+	execSpoolDir        string
+	execSpoolMaxBytes   int64
+	execSpoolMaxRecords int
+	execSpoolRetention  time.Duration
 )
 
 var execCmd = &cobra.Command{
@@ -41,6 +44,9 @@ func init() {
 	execCmd.Flags().StringVarP(&execJobID, "job-id", "j", "", "Job ID for this execution")
 	execCmd.Flags().StringVar(&execSocketPath, "socket-path", "", "Path to daemon socket")
 	execCmd.Flags().StringVar(&execSpoolDir, "spool-dir", "", "Fallback report spool directory")
+	execCmd.Flags().Int64Var(&execSpoolMaxBytes, "spool-max-bytes", defaultSpoolMaxBytes, "Maximum bytes retained in the fallback report spool")
+	execCmd.Flags().IntVar(&execSpoolMaxRecords, "spool-max-records", defaultSpoolMaxRecords, "Maximum reports retained in the fallback report spool")
+	execCmd.Flags().DurationVar(&execSpoolRetention, "spool-retention", defaultSpoolRetention, "Maximum age of fallback reports")
 }
 
 func runExec(cmd *cobra.Command, args []string) {
@@ -161,7 +167,12 @@ func runExec(cmd *cobra.Command, args []string) {
 			if spoolDir == "" {
 				spoolDir = filepath.Join(filepath.Dir(effectiveSocketPath()), "spool")
 			}
-			if spoolErr := writeSpoolRecord(spoolDir, record); spoolErr != nil {
+			policy := spoolPolicy{
+				maxBytes:   execSpoolMaxBytes,
+				maxRecords: execSpoolMaxRecords,
+				retention:  execSpoolRetention,
+			}
+			if spoolErr := writeSpoolRecordWithPolicy(spoolDir, record, policy); spoolErr != nil {
 				fmt.Fprintf(os.Stderr,
 					"Warning: Failed to send report to daemon (%v) and failed to spool it (%v)\n",
 					err, spoolErr)

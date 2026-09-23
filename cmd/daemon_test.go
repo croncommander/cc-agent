@@ -3,6 +3,7 @@ package cmd
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/croncommander/cc-agent/internal/protocol"
 )
@@ -91,5 +92,28 @@ func TestGenerateCronContent_CommandInjection(t *testing.T) {
 	// Ensure no raw injection
 	if strings.Contains(output, " --job-id id-injection; rm -rf /") {
 		t.Errorf("Vulnerability found: Job ID injection possible")
+	}
+}
+
+func TestGenerateCronContentCarriesSpoolBounds(t *testing.T) {
+	content := generateCronContentWithPolicy(
+		[]protocol.JobDefinition{{
+			JobID:          "bounded-job",
+			CronExpression: "0 * * * *",
+			Command:        "true",
+		}},
+		false,
+		"/var/lib/croncommander/spool",
+		spoolPolicy{maxBytes: 4096, maxRecords: 12, retention: 6 * time.Hour},
+	)
+	output := string(content)
+	for _, expected := range []string{
+		"--spool-max-bytes 4096",
+		"--spool-max-records 12",
+		"--spool-retention '6h0m0s'",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated cron omitted %q: %s", expected, output)
+		}
 	}
 }

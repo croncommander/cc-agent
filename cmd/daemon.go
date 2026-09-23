@@ -89,6 +89,9 @@ type Config struct {
 	DiscoveryInterval string `yaml:"discovery_interval"`
 	StateFile         string `yaml:"state_file"`
 	SpoolDir          string `yaml:"spool_dir"`
+	SpoolMaxBytes     int64  `yaml:"spool_max_bytes"`
+	SpoolMaxRecords   int    `yaml:"spool_max_records"`
+	SpoolRetention    string `yaml:"spool_retention"`
 	AllowInsecureHTTP bool   `yaml:"allow_insecure_http"`
 }
 
@@ -109,6 +112,7 @@ type daemon struct {
 	isRoot         bool
 	stateFile      string
 	spoolDir       string
+	spoolPolicy    spoolPolicy
 	state          agentState
 	httpClient     *http.Client
 	pollInterval   time.Duration
@@ -130,6 +134,10 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	stateFile, spoolDir := defaultRuntimePaths(configPath)
 	allowInsecureHTTP := false
 	discoveryEvery := defaultDiscoveryInterval
+	policy, err := spoolPolicyFromConfig(config)
+	if err != nil {
+		log.Fatalf("Invalid spool policy: %v", err)
+	}
 
 	if config != nil {
 		if apiKey == "" {
@@ -180,6 +188,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		isRoot:         isRoot,
 		stateFile:      stateFile,
 		spoolDir:       spoolDir,
+		spoolPolicy:    policy,
 		httpClient:     newHTTPClient(),
 		pollInterval:   defaultPoll,
 		pollJitter:     defaultPollJitter,
@@ -410,7 +419,7 @@ func (d *daemon) syncCron(jobs []protocol.JobDefinition) error {
 }
 
 func (d *daemon) syncSystemCron(jobs []protocol.JobDefinition) error {
-	content := generateCronContentWithSpool(jobs, true, d.spoolDir)
+	content := generateCronContentWithPolicy(jobs, true, d.spoolDir, d.spoolPolicy)
 	tmpFile := cronFilePath + ".tmp"
 	if err := os.WriteFile(tmpFile, content, 0644); err != nil {
 		return fmt.Errorf("write cron file: %w", err)
@@ -423,7 +432,7 @@ func (d *daemon) syncSystemCron(jobs []protocol.JobDefinition) error {
 }
 
 func (d *daemon) syncUserCron(jobs []protocol.JobDefinition) error {
-	content := generateCronContentWithSpool(jobs, false, d.spoolDir)
+	content := generateCronContentWithPolicy(jobs, false, d.spoolDir, d.spoolPolicy)
 	command := exec.Command("crontab", "-")
 	command.Stdin = bytes.NewReader(content)
 	output, err := command.CombinedOutput()
@@ -442,6 +451,16 @@ func generateCronContent(jobs []protocol.JobDefinition, systemMode bool) []byte 
 }
 
 func generateCronContentWithSpool(jobs []protocol.JobDefinition, systemMode bool, spoolDir string) []byte {
+	return generateCronContentWithPolicy(jobs, systemMode, spoolDir, defaultSpoolPolicy())
+}
+
+func generateCronContentWithPolicy(
+	jobs []protocol.JobDefinition,
+	systemMode bool,
+	spoolDir string,
+	policy spoolPolicy,
+) []byte {
+	policy = policy.normalized()
 	var buf bytes.Buffer
 	buf.Grow(len(jobs) * 100)
 
@@ -473,6 +492,12 @@ func generateCronContentWithSpool(jobs []protocol.JobDefinition, systemMode bool
 		writeShellQuote(&buf, socketPath)
 		buf.WriteString(" --spool-dir ")
 		writeShellQuote(&buf, spoolDir)
+		buf.WriteString(" --spool-max-bytes ")
+		buf.WriteString(fmt.Sprintf("%d", policy.maxBytes))
+		buf.WriteString(" --spool-max-records ")
+		buf.WriteString(fmt.Sprintf("%d", policy.maxRecords))
+		buf.WriteString(" --spool-retention ")
+		writeShellQuote(&buf, policy.retention.String())
 		buf.WriteString(" -- /bin/sh -c ")
 		writeShellQuote(&buf, job.Command)
 		buf.WriteByte('\n')
@@ -580,7 +605,7 @@ func (d *daemon) handleSocketConnection(conn net.Conn) {
 		return
 	}
 
-	if err := writeSpoolRecord(d.spoolDir, report); err != nil {
+	if err := writeSpoolRecordWithPolicy(d.spoolDir, report, d.spoolPolicy); err != nil {
 		d.writeSocketAck(conn, false, "failed to persist execution report")
 		log.Printf("Failed to spool execution report: %v", err)
 		return
@@ -608,20 +633,14 @@ func (d *daemon) spoolReport(payload protocol.ExecutionReportPayload) (string, e
 		return "", err
 	}
 	record := protocol.SpooledReport{EventID: eventID, Payload: payload}
-	if err := writeSpoolRecord(d.spoolDir, record); err != nil {
+	if err := writeSpoolRecordWithPolicy(d.spoolDir, record, d.spoolPolicy); err != nil {
 		return "", err
 	}
 	return eventID, nil
 }
 
 func writeSpoolRecord(spoolDir string, record protocol.SpooledReport) error {
-	if !validEventID(record.EventID) {
-		return errors.New("execution report event ID is not a UUID")
-	}
-	if err := ensurePrivateDir(spoolDir); err != nil {
-		return err
-	}
-	return writeJSONAtomic(filepath.Join(spoolDir, record.EventID+".json"), record)
+	return writeSpoolRecordWithPolicy(spoolDir, record, defaultSpoolPolicy())
 }
 
 func (d *daemon) flushSpool() error {

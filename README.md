@@ -15,16 +15,17 @@ CronCommander Agent is a lightweight Go binary that connects your servers to the
 - **Cron Synchronization**: Receives job definitions from the server and writes them to `/etc/cron.d/croncommander`
 - **Cron Discovery**: Scans existing user and system cron sources for review and import
 - **Execution Wrapper**: Wraps each job to capture stdout/stderr, exit codes, and timing
+- **Bounded Durable Spool**: Retains reports across outages with configurable age, record, and byte limits
 - **Dual Modes**: User Mode (unprivileged, manages its own crontab) or System Mode (root, manages `/etc/cron.d`)
 - **Security Hardened**: No-new-privileges, minimal environment, controlled working directory
 - **Version Injection**: Version is embedded at compile time via `-ldflags`
 
 ## Installation
 
-> **Current release:** v2.2.1. Published binaries and adjacent SHA-256
+> **Current release:** v2.3.0. Published binaries and adjacent SHA-256
 > checksums are available from the GitHub Releases page.
 
-### Quick Install (Linux / FreeBSD / macOS)
+### Quick Install (Linux)
 
 ```bash
 curl -sSL https://croncommander.com/install.sh | bash
@@ -37,7 +38,9 @@ CC_API_KEY="your-api-key" \
   curl -sSL https://croncommander.com/install.sh | bash
 ```
 
-The installer auto-detects your OS and architecture and downloads the correct binary.
+The automatic service installer supports Linux and detects systemd, OpenRC, or
+SysV init. FreeBSD and macOS release binaries require manual service
+configuration.
 Remote installs also download the adjacent `.sha256` asset and refuse to
 install a binary that does not match it.
 
@@ -50,12 +53,12 @@ install a binary that does not match it.
 
 2. **Verify the binary**:
    ```bash
-   sha256sum -c cc-agent-2-2-1-linux-amd64.sha256
+   sha256sum -c cc-agent-2-3-0-linux-amd64.sha256
    ```
 
 3. **Install the binary**:
    ```bash
-   sudo cp cc-agent-2-2-1-linux-amd64 /usr/local/bin/cc-agent
+   sudo cp cc-agent-2-3-0-linux-amd64 /usr/local/bin/cc-agent
    sudo chmod 755 /usr/local/bin/cc-agent
    ```
 
@@ -148,6 +151,11 @@ server_url: https://gateway.croncommander.com
 state_file: /var/lib/croncommander/agent-state.json
 spool_dir: /var/lib/croncommander/spool
 
+# Durable report queue bounds (oldest reports are evicted first)
+spool_max_bytes: 268435456
+spool_max_records: 10000
+spool_retention: 720h
+
 # Local development only; leave false in production
 allow_insecure_http: false
 
@@ -187,8 +195,8 @@ make build
 ```
 
 Produces versioned binaries and adjacent checksum files in `bin/`, e.g.
-`cc-agent-2-2-1-linux-amd64` and
-`cc-agent-2-2-1-linux-amd64.sha256`.
+`cc-agent-2-3-0-linux-amd64` and
+`cc-agent-2-3-0-linux-amd64.sha256`.
 
 For the local Docker Compose agents, build and sync the Linux amd64 artifact:
 
