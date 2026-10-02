@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +28,70 @@ func TestNormalizeServerURLRequiresExplicitInsecureDevelopmentMode(t *testing.T)
 	}
 	if _, err := normalizeServerURL("https://gateway.example/agent", false); err == nil {
 		t.Fatal("Expected legacy API path to be rejected")
+	}
+}
+
+// Governance is server-side: pending proposals do not change the effective
+// manifest. A committed approval is delivered through the existing v2 protocol.
+func TestGovernanceManifestKeepsPendingChangesOffHost(t *testing.T) {
+	dir := t.TempDir()
+	cronFilePath := filepath.Join(dir, "croncommander")
+	t.Setenv("CC_TEST_CRON", cronFilePath)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := os.WriteFile(filepath.Join(dir, "crontab"), []byte("#!/bin/sh\n/bin/cat > \"$CC_TEST_CRON\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	responses := []protocol.PollResponse{
+		{ManifestVersion: "effective-1", Changed: true, Jobs: []protocol.JobDefinition{{JobID: "owned-job", CronExpression: "0 * * * *", Command: "echo approved"}}},
+		{ManifestVersion: "effective-1", Changed: false},                                  // Pending proposal or rejected change.
+		{ManifestVersion: "effective-2", Changed: true, Jobs: []protocol.JobDefinition{}}, // Approved delete.
+	}
+	index := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-agent-token" {
+			t.Error("missing agent credential")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(responses[index])
+		index++
+	}))
+	defer server.Close()
+	d := &daemon{serverURL: server.URL, httpClient: newHTTPClient(), executionMode: "user",
+		stateFile: filepath.Join(dir, "state.json"), spoolDir: filepath.Join(dir, "spool"), spoolPolicy: defaultSpoolPolicy(),
+		state: agentState{AgentID: "test-agent", AgentToken: "test-agent-token"}}
+	if err := d.poll(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(cronFilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(before), "echo approved") {
+		t.Fatal("effective job was not installed")
+	}
+	if err := d.poll(); err != nil {
+		t.Fatal(err)
+	}
+	pending, _ := os.ReadFile(cronFilePath)
+	if string(pending) != string(before) {
+		t.Fatal("unchanged manifest altered host cron")
+	}
+	if err := d.poll(); err != nil {
+		t.Fatal(err)
+	}
+	deleted, _ := os.ReadFile(cronFilePath)
+	if strings.Contains(string(deleted), "owned-job") {
+		t.Fatal("approved deletion was not applied")
+	}
+	if d.state.ManifestVersion != "effective-2" {
+		t.Fatal("manifest version was not persisted")
+	}
+	info, err := os.Stat(d.stateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("credential state permissions: %o", info.Mode().Perm())
 	}
 }
 

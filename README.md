@@ -221,6 +221,16 @@ go test ./...
 
 ## Architecture
 
+### Governance and effective manifests
+
+Ownership, workspace roles, and Agency approvals are enforced in `cc-server`.
+Pending or rejected proposals never change the effective job manifest. After
+independent approval, the listener returns the committed definition through the
+existing HTTPS v2 poll protocol. Approved disable/delete operations remove the
+job on the next successful poll; previously installed cron remains in effect
+while a proposal is pending or the gateway is unreachable. No agent upgrade or
+new protocol is required for this governance rollout.
+
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Host/Container                                         │
